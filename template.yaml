@@ -17,6 +17,89 @@ Globals:
 
 Resources:
 
+  # ── AppSync Events API ────────────────────────────────────────────
+
+  RealtimeApi:
+    Type: AWS::AppSync::Api
+    Properties:
+      Name: cvpr-pipeline-events
+      EventConfig:
+        AuthProviders:
+          - AuthType: API_KEY
+        ConnectionAuthModes:
+          - AuthType: API_KEY
+        DefaultPublishAuthModes:
+          - AuthType: API_KEY
+        DefaultSubscribeAuthModes:
+          - AuthType: API_KEY
+
+  RealtimeApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId: !GetAtt RealtimeApi.ApiId
+
+  PipelineChannel:
+    Type: AWS::AppSync::ChannelNamespace
+    Properties:
+      ApiId: !GetAtt RealtimeApi.ApiId
+      Name: pipeline
+
+  # ── HTTP API ──────────────────────────────────────────────────────
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: [POST, OPTIONS]
+        AllowHeaders: [Content-Type]
+
+  # ── API handler — async invoke + return AppSync connection info ───
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: cvpr-api
+      Handler: handler.handler
+      CodeUri: src/api/
+      Timeout: 10
+      Environment:
+        Variables:
+          PIPELINE_FUNCTION_ARN: !Ref ImageAnalysisPipeline.Alias
+          REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
+          REALTIME_WS_ENDPOINT: !Sub "wss://${RealtimeApi.Dns.Realtime}/event/realtime"
+          REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !GetAtt ImageAnalysisPipeline.Arn
+                - !Sub "${ImageAnalysisPipeline.Arn}:*"
+      Events:
+        Analyze:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /analyze
+            Method: POST
+        Options:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /analyze
+            Method: OPTIONS
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        Sourcemap: true
+        EntryPoints: [handler.ts]
+
+  # ── Durable pipeline function ─────────────────────────────────────
+
   ImageAnalysisPipeline:
     Type: AWS::Serverless::Function
     Properties:
@@ -24,6 +107,10 @@ Resources:
       Handler: handler.handler
       CodeUri: src/image-analysis-pipeline/
       AutoPublishAlias: demo
+      Environment:
+        Variables:
+          REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
+          REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
       DurableConfig:
         ExecutionTimeout: 900
         RetentionPeriodInDays: 1
@@ -36,6 +123,9 @@ Resources:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
               Resource: "*"   # Bedrock has no SAM policy template; scoped by action
+            - Effect: Allow
+              Action: appsync:EventPublish
+              Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${RealtimeApi.ApiId}"
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -44,13 +134,37 @@ Resources:
         Sourcemap: true
         EntryPoints: [handler.ts]
 
+  # ── Log groups ────────────────────────────────────────────────────
+
   PipelineLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ImageAnalysisPipeline}"
       RetentionInDays: 1
 
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
+      RetentionInDays: 1
+
 Outputs:
+
+  ApiUrl:
+    Description: HTTP API endpoint
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/analyze"
+
+  RealtimeEndpoint:
+    Description: AppSync Events HTTP endpoint
+    Value: !Sub "https://${RealtimeApi.Dns.Http}/event"
+
+  RealtimeWsEndpoint:
+    Description: AppSync Events WebSocket endpoint
+    Value: !Sub "wss://${RealtimeApi.Dns.Realtime}/event/realtime"
+
+  RealtimeApiKey:
+    Description: AppSync Events API key
+    Value: !GetAtt RealtimeApiKey.ApiKey
 
   FunctionArn:
     Description: Unqualified function ARN

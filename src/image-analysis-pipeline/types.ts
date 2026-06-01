@@ -1,5 +1,6 @@
 export interface AnalysisPipelineEvent {
   imageId: string;
+  executionId?: string;  // AppSync channel suffix; defaults to imageId
   imageBase64: string;
   imageMediaType?: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
   gridSize?: number; // rows × cols, default 3 → 9 regions
