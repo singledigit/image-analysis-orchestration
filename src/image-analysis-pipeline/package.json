@@ -1,0 +1,17 @@
+{
+  "name": "image-analysis-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.0.0",
+    "@aws/durable-execution-sdk-js": "latest"
+  },
+  "devDependencies": {
+    "@aws/durable-execution-sdk-js-testing": "latest",
+    "@types/jest": "^29.0.0",
+    "@types/node": "^22.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0"
+  }
+}

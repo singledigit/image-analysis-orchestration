@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CVPR 2026 — Durable image analysis pipeline demo
+
+Globals:
+  Function:
+    Runtime: nodejs24.x
+    Architectures: [arm64]
+    Timeout: 900
+    MemorySize: 1024
+    Tracing: Active
+    Environment:
+      Variables:
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+        MODEL_ID: "amazon.nova-lite-v1:0"
+        LOG_LEVEL: INFO
+
+Resources:
+
+  ImageAnalysisPipeline:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: cvpr-image-analysis-pipeline
+      Handler: handler.handler
+      CodeUri: src/image-analysis-pipeline/
+      AutoPublishAlias: demo
+      DurableConfig:
+        ExecutionTimeout: 900
+        RetentionPeriodInDays: 1
+      Policies:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicDurableExecutionRolePolicy
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: "*"   # Bedrock has no SAM policy template; scoped by action
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        Sourcemap: true
+        EntryPoints: [handler.ts]
+
+  PipelineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ImageAnalysisPipeline}"
+      RetentionInDays: 1
+
+Outputs:
+
+  FunctionArn:
+    Description: Unqualified function ARN
+    Value: !GetAtt ImageAnalysisPipeline.Arn
+
+  AliasArn:
+    Description: Qualified alias ARN — use this to invoke
+    Value: !Ref ImageAnalysisPipeline.Alias
+
+  StackName:
+    Value: !Ref AWS::StackName
