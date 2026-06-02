@@ -30,7 +30,7 @@
       <!-- HUD label -->
       <div
         class="hud-label"
-        :class="{ left: isRightHalf(obj) }"
+        :class="{ right: isRightHalf(obj) }"
         :style="labelStyle(obj, i)"
       >
         <span class="label-bracket">[</span>
@@ -138,10 +138,11 @@ function isRightHalf(obj: DetectedObject) {
 
 function labelStyle(obj: DetectedObject, index: number) {
   const onRight = !isRightHalf(obj)
+  // Anchor just inside the top bracket corner, 2px below y1 so it clears the bracket stroke
   return {
-    left:  onRight ? `${obj.x2 * 100}%` : 'auto',
-    right: !onRight ? `${(1 - obj.x1) * 100}%` : 'auto',
-    top:   `${obj.y1 * 100}%`,
+    left:  onRight ? `${obj.x1 * 100}%` : 'auto',
+    right: !onRight ? `${(1 - obj.x2) * 100}%` : 'auto',
+    top:   `calc(${obj.y1 * 100}% + 4px)`,
     animationDelay: `${index * 40}ms`,
   }
 }
@@ -259,8 +260,8 @@ onMounted(() => {
   from { opacity: 0; transform: translateX(-4px); }
   to   { opacity: 1; transform: translateX(0); }
 }
-.hud-label.left { animation-name: labelInLeft; }
-@keyframes labelInLeft {
+.hud-label.right { animation-name: labelInRight; }
+@keyframes labelInRight {
   from { opacity: 0; transform: translateX(4px); }
   to   { opacity: 1; transform: translateX(0); }
 }
