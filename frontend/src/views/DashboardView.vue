@@ -389,45 +389,56 @@ header {
 }
 
 /* Grid */
-.grid-area { flex: 1; padding: 1.25rem; overflow-y: auto; }
+.grid-area { flex: 1; padding: 1.5rem; overflow-y: auto; }
 
 .empty-msg {
-  color: var(--text-muted); font-size: 13px; text-align: center;
+  color: var(--text-dim); font-size: 15px; text-align: center;
   padding: 4rem 2rem;
 }
 
 .results-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: .75rem;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
 }
 
 .result-card {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-mid);
+  border-left: 3px solid var(--border-mid);
+  border-radius: 4px;
   overflow: hidden; cursor: pointer;
-  transition: border-color .2s, transform .15s;
+  transition: border-color .2s, border-left-color .2s, transform .15s;
 }
-.result-card:hover { border-color: var(--amber); transform: translateY(-2px); }
+.result-card:hover {
+  border-color: var(--amber);
+  border-left-color: var(--amber);
+  transform: translateY(-3px);
+}
 
 .card-img {
   position: relative; aspect-ratio: 1;
-  background: var(--bg-raised); overflow: hidden;
+  background: var(--bg-panel); overflow: hidden;
 }
 .card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-img-placeholder {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  font-size: 2rem; color: var(--text-muted);
+  font-size: 2.5rem; color: var(--text-muted);
 }
 .card-img-placeholder.large { font-size: 3rem; }
 .card-badge {
-  position: absolute; bottom: .35rem; right: .35rem;
-  background: rgba(10,10,10,.85); border: 1px solid var(--border-mid);
-  border-radius: 2px; font-size: 9px; padding: .15rem .4rem;
+  position: absolute; bottom: .4rem; right: .4rem;
+  background: rgba(10,10,10,.9); border: 1px solid rgba(245,166,35,.4);
+  border-radius: 2px; font-size: 11px; font-weight: 500; padding: .2rem .5rem;
   color: var(--amber);
 }
-.card-body { padding: .5rem .6rem; }
-.card-scene { font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.card-time { font-size: 10px; color: var(--text-muted); margin-top: .15rem; }
+.card-body { padding: .65rem .75rem; }
+.card-scene {
+  font-family: var(--serif); font-size: 1rem; font-weight: 400;
+  color: var(--text); line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card-time { font-size: 11px; color: #888; margin-top: .3rem; }
 
 /* Detail overlay */
 .detail-overlay {
@@ -492,13 +503,15 @@ header {
     height: calc(100vh - 53px); /* full height minus header */
     overflow-y: auto;
   }
-  .cta-headline { font-size: 1.75rem; }
+  .cta-headline { font-size: 1.9rem; }
   .cta-url { font-size: 1rem; }
-  .stat-value { font-size: 2.75rem; }
+  .stat-value { font-size: 3.5rem; }
+  .stat-label { font-size: 10px; }
+  .explainer-list li { font-size: 12px; }
 
-  .grid-area { overflow-y: visible; }
-  /* Fixed 4-column grid — page scrolls naturally */
-  .results-grid { grid-template-columns: repeat(4, 1fr); gap: 1rem; align-content: start; }
+  .grid-area { overflow-y: visible; padding: 1.75rem; }
+  /* 3 columns — bigger cards, readable from across the room */
+  .results-grid { grid-template-columns: repeat(3, 1fr); gap: 1.25rem; align-content: start; }
 
   .detail-overlay { align-items: center; padding: 2rem; }
   .detail-panel { border-radius: 8px; max-height: 80vh; }
