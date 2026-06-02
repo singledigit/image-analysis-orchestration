@@ -1,48 +1,61 @@
 <template>
   <div class="jarvis-root">
+
+    <!-- Controls -->
+    <div v-if="!running && visibleObjects.length > 0" class="hud-controls">
+      <button
+        class="hud-toggle"
+        :class="{ active: showPrimary }"
+        @click.stop="showPrimary = !showPrimary"
+      >Primary</button>
+      <button
+        class="hud-toggle"
+        :class="{ active: showSecondary }"
+        @click.stop="showSecondary = !showSecondary"
+      >Secondary</button>
+    </div>
+
     <!-- Scan sweep line -->
     <div class="scan-sweep" :class="{ sweeping }" />
 
     <!-- Per-object targeting brackets + labels -->
-    <template v-for="(obj, i) in visibleObjects" :key="`${obj.label}-${i}`">
+    <template v-for="(obj, i) in filteredObjects" :key="`${obj.label}-${i}`">
       <svg
         class="bracket-svg"
+        :class="obj.primary ? 'primary' : 'secondary'"
         :style="bracketStyle(obj)"
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
       >
-        <!-- Corner brackets — top-left -->
         <polyline points="18,5 5,5 5,18" class="bracket" />
-        <!-- top-right -->
         <polyline points="82,5 95,5 95,18" class="bracket" />
-        <!-- bottom-left -->
         <polyline points="5,82 5,95 18,95" class="bracket" />
-        <!-- bottom-right -->
         <polyline points="95,82 95,95 82,95" class="bracket" />
-        <!-- Center crosshair dot -->
-        <circle cx="50" cy="50" r="2.5" class="center-dot" />
-        <line x1="42" y1="50" x2="35" y2="50" class="crosshair-line" />
-        <line x1="58" y1="50" x2="65" y2="50" class="crosshair-line" />
-        <line x1="50" y1="42" x2="50" y2="35" class="crosshair-line" />
-        <line x1="50" y1="58" x2="50" y2="65" class="crosshair-line" />
+        <template v-if="obj.primary">
+          <circle cx="50" cy="50" r="2.5" class="center-dot" />
+          <line x1="42" y1="50" x2="35" y2="50" class="crosshair-line" />
+          <line x1="58" y1="50" x2="65" y2="50" class="crosshair-line" />
+          <line x1="50" y1="42" x2="50" y2="35" class="crosshair-line" />
+          <line x1="50" y1="58" x2="50" y2="65" class="crosshair-line" />
+        </template>
       </svg>
 
-      <!-- HUD label -->
+      <!-- Label — primary always shows; secondary shows on hover via CSS -->
       <div
         class="hud-label"
-        :class="{ right: isRightHalf(obj) }"
+        :class="[obj.primary ? 'primary' : 'secondary', { 'anchor-right': isRightHalf(obj) }]"
         :style="labelStyle(obj, i)"
       >
         <span class="label-bracket">[</span>
         <span class="label-text">{{ obj.label }}</span>
         <span class="label-bracket">]</span>
-        <span v-if="obj.confidence !== 'low'" class="label-conf" :class="obj.confidence">
+        <span v-if="obj.primary && obj.confidence !== 'low'" class="label-conf" :class="obj.confidence">
           {{ obj.confidence === 'high' ? '●●●' : '●●○' }}
         </span>
       </div>
     </template>
 
-    <!-- Per-region dim overlays while scanning -->
+    <!-- Region flash on finding arrival -->
     <div
       v-for="(region, i) in activeRegions"
       :key="`region-${i}`"
@@ -59,6 +72,7 @@ interface DetectedObject {
   label: string
   x1: number; y1: number; x2: number; y2: number
   confidence: 'high' | 'medium' | 'low'
+  primary: boolean
 }
 
 interface RegionFinding {
@@ -77,11 +91,18 @@ const props = defineProps<{
   running: boolean
 }>()
 
-const sweeping = ref(false)
+const sweeping      = ref(false)
+const showPrimary   = ref(true)
+const showSecondary = ref(true)
 const visibleObjects = ref<DetectedObject[]>([])
-const activeRegions = ref<ActiveRegion[]>([])
+const activeRegions  = ref<ActiveRegion[]>([])
 
-// Trigger scan sweep + reveal objects whenever new findings arrive
+const filteredObjects = computed(() =>
+  visibleObjects.value.filter(o =>
+    o.primary ? showPrimary.value : showSecondary.value
+  )
+)
+
 watch(() => props.findings.length, (newLen, oldLen) => {
   const f = props.findings[newLen - 1]
   if (newLen > oldLen && f) revealFinding(f)
@@ -92,6 +113,8 @@ watch(() => props.running, (r) => {
     sweeping.value = true
     visibleObjects.value = []
     activeRegions.value = []
+    showPrimary.value = true
+    showSecondary.value = true
   } else {
     sweeping.value = false
   }
@@ -103,17 +126,14 @@ function revealFinding(finding: RegionFinding) {
   const region: ActiveRegion = {
     x: (finding.regionIndex % props.gridSize) * pct,
     y: Math.floor(finding.regionIndex / props.gridSize) * pct,
-    w: pct,
-    h: pct,
+    w: pct, h: pct,
   }
   activeRegions.value.push(region)
 
-  // Stagger objects into view
   finding.detectedObjects.forEach((obj, i) => {
     setTimeout(() => {
-      visibleObjects.value.push(obj)
-      // Remove region dim overlay once objects are shown
-      if (i === (finding.detectedObjects!.length - 1)) {
+      visibleObjects.value.push({ ...obj, primary: obj.primary ?? true })
+      if (i === finding.detectedObjects!.length - 1) {
         setTimeout(() => {
           activeRegions.value = activeRegions.value.filter(r => r !== region)
         }, 600)
@@ -123,7 +143,7 @@ function revealFinding(finding: RegionFinding) {
 }
 
 function bracketStyle(obj: DetectedObject) {
-  const pad = 0.01
+  const pad = 0.008
   return {
     left:   `${(obj.x1 - pad) * 100}%`,
     top:    `${(obj.y1 - pad) * 100}%`,
@@ -137,11 +157,10 @@ function isRightHalf(obj: DetectedObject) {
 }
 
 function labelStyle(obj: DetectedObject, index: number) {
-  const onRight = !isRightHalf(obj)
-  // Anchor just inside the top bracket corner, 2px below y1 so it clears the bracket stroke
+  const onRight = isRightHalf(obj)
   return {
-    left:  onRight ? `${obj.x1 * 100}%` : 'auto',
-    right: !onRight ? `${(1 - obj.x2) * 100}%` : 'auto',
+    left:  !onRight ? `${obj.x1 * 100}%` : 'auto',
+    right:  onRight ? `${(1 - obj.x2) * 100}%` : 'auto',
     top:   `calc(${obj.y1 * 100}% + 4px)`,
     animationDelay: `${index * 40}ms`,
   }
@@ -149,15 +168,12 @@ function labelStyle(obj: DetectedObject, index: number) {
 
 function regionStyle(r: ActiveRegion) {
   return {
-    left:   `${r.x * 100}%`,
-    top:    `${r.y * 100}%`,
-    width:  `${r.w * 100}%`,
-    height: `${r.h * 100}%`,
+    left: `${r.x * 100}%`, top: `${r.y * 100}%`,
+    width: `${r.w * 100}%`, height: `${r.h * 100}%`,
   }
 }
 
 onMounted(() => {
-  // Reveal any findings that loaded before mount (e.g. result view)
   props.findings.forEach(f => revealFinding(f))
 })
 </script>
@@ -169,17 +185,37 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* Scan sweep */
+/* ── Controls ─────────────────────────────────────────────────── */
+.hud-controls {
+  position: absolute; bottom: .6rem; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: .4rem;
+  z-index: 20;
+  pointer-events: all;
+  animation: fadeUp .3s ease;
+}
+.hud-toggle {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; font-weight: 500; letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: .3rem .7rem;
+  background: rgba(10,10,10,.85);
+  border: 1px solid var(--border-mid);
+  border-radius: 2px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.hud-toggle.active { color: var(--amber); border-color: rgba(245,166,35,.5); }
+.hud-toggle:hover  { color: var(--text); }
+
+/* ── Scan sweep ───────────────────────────────────────────────── */
 .scan-sweep {
-  position: absolute; left: 0; right: 0;
-  height: 2px;
+  position: absolute; left: 0; right: 0; height: 2px;
   background: linear-gradient(90deg, transparent 0%, var(--amber) 50%, transparent 100%);
-  opacity: 0;
-  top: 0;
+  opacity: 0; top: 0;
 }
-.scan-sweep.sweeping {
-  animation: sweep 2.4s cubic-bezier(.4,0,.6,1) infinite;
-}
+.scan-sweep.sweeping { animation: sweep 2.4s cubic-bezier(.4,0,.6,1) infinite; }
 @keyframes sweep {
   0%   { top: 0%;   opacity: 0; }
   5%   { opacity: .8; }
@@ -187,23 +223,27 @@ onMounted(() => {
   100% { top: 100%; opacity: 0; }
 }
 
-/* Corner bracket SVG */
+/* ── Brackets ─────────────────────────────────────────────────── */
 .bracket-svg {
   position: absolute;
   animation: bracketIn .25s ease forwards;
   opacity: 0;
+  transition: opacity .2s;
 }
-@keyframes bracketIn {
-  from { opacity: 0; transform: scale(.92); }
-  to   { opacity: 1; transform: scale(1); }
+.bracket-svg.secondary {
+  opacity: 0;
+  animation: bracketInDim .25s ease forwards;
 }
+@keyframes bracketIn    { from { opacity:0; transform:scale(.92); } to { opacity:1;    transform:scale(1); } }
+@keyframes bracketInDim { from { opacity:0; transform:scale(.95); } to { opacity:0.35; transform:scale(1); } }
 
 .bracket {
-  fill: none;
-  stroke: var(--amber);
-  stroke-width: 4;
-  stroke-linecap: square;
+  fill: none; stroke: var(--amber); stroke-width: 4; stroke-linecap: square;
   filter: drop-shadow(0 0 3px rgba(245,166,35,.7));
+}
+.bracket-svg.secondary .bracket {
+  stroke: rgba(245,166,35,.5);
+  filter: none;
 }
 
 .center-dot {
@@ -211,64 +251,55 @@ onMounted(() => {
   filter: drop-shadow(0 0 4px var(--amber));
   animation: dotPulse 1.8s ease-in-out infinite;
 }
-@keyframes dotPulse {
-  0%,100% { opacity: 1; r: 2.5; }
-  50%      { opacity: .5; r: 1.5; }
-}
+@keyframes dotPulse { 0%,100% { opacity:1; r:2.5; } 50% { opacity:.5; r:1.5; } }
 
-.crosshair-line {
-  stroke: rgba(245,166,35,.5);
-  stroke-width: 1.5;
-}
+.crosshair-line { stroke: rgba(245,166,35,.5); stroke-width: 1.5; }
 
-/* Region scan dim */
+/* ── Region flash ─────────────────────────────────────────────── */
 .region-scan {
   position: absolute;
   background: rgba(245,166,35,.07);
   border: 1px solid rgba(245,166,35,.3);
   animation: regionFlash .4s ease forwards;
 }
-@keyframes regionFlash {
-  0%   { opacity: 0; }
-  30%  { opacity: 1; }
-  100% { opacity: 0; }
-}
+@keyframes regionFlash { 0% { opacity:0; } 30% { opacity:1; } 100% { opacity:0; } }
 
-/* HUD labels */
+/* ── HUD labels ───────────────────────────────────────────────── */
 .hud-label {
   position: absolute;
   display: flex; align-items: center; gap: 3px;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px; font-weight: 500;
+  font-size: 10px; font-weight: 500; letter-spacing: .04em;
+  text-transform: uppercase;
   color: var(--amber);
   background: rgba(10,10,10,.82);
   padding: 2px 6px;
   border: 1px solid rgba(245,166,35,.4);
   border-radius: 2px;
   white-space: nowrap;
-  margin-left: 6px;
-  animation: labelIn .2s ease forwards;
-  opacity: 0;
   text-shadow: 0 0 8px rgba(245,166,35,.6);
   z-index: 10;
+  animation: labelIn .2s ease forwards;
+  opacity: 0;
 }
-.hud-label.left {
-  margin-left: 0;
-  margin-right: 6px;
-}
-@keyframes labelIn {
-  from { opacity: 0; transform: translateX(-4px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-.hud-label.right { animation-name: labelInRight; }
-@keyframes labelInRight {
-  from { opacity: 0; transform: translateX(4px); }
-  to   { opacity: 1; transform: translateX(0); }
+.hud-label.anchor-right { animation-name: labelInRight; }
+
+/* Secondary labels: dimmer, no border, smaller */
+.hud-label.secondary {
+  font-size: 9px;
+  color: rgba(245,166,35,.45);
+  background: rgba(10,10,10,.65);
+  border-color: rgba(245,166,35,.15);
+  text-shadow: none;
+  animation: labelInDim .2s ease forwards;
 }
 
-.label-bracket { opacity: .5; font-size: 10px; }
-.label-text { letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
-.label-conf { font-size: 8px; letter-spacing: .02em; }
+@keyframes labelIn     { from { opacity:0; transform:translateX(-4px); } to { opacity:1; transform:translateX(0); } }
+@keyframes labelInRight{ from { opacity:0; transform:translateX(4px);  } to { opacity:1; transform:translateX(0); } }
+@keyframes labelInDim  { from { opacity:0; } to { opacity:.7; } }
+
+.label-bracket { opacity: .5; font-size: 9px; }
+.label-conf    { font-size: 8px; }
 .label-conf.high   { color: var(--green); }
 .label-conf.medium { color: var(--amber); }
 </style>

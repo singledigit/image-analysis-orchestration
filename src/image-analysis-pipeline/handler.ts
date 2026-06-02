@@ -63,11 +63,13 @@ async function analyzeRegion(
     `    {\n` +
     `      "label": "object name",\n` +
     `      "x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0,\n` +
-    `      "confidence": "high|medium|low"\n` +
+    `      "confidence": "high|medium|low",\n` +
+    `      "primary": true\n` +
     `    }\n` +
     `  ]\n` +
     `}\n\n` +
-    `x1,y1,x2,y2 are normalized [0-1] relative to the FULL image. ` +
+    `x1,y1,x2,y2 are normalized [0-1] relative to the FULL image.\n` +
+    `"primary": true = dominant subject the scene is about; false = background/contextual/supporting object.\n` +
     `Only include objects you can clearly see. Return empty array if nothing distinct is visible.`;
 
   const raw = await invokeNova(prompt, imageBase64, imageFormat);

@@ -25,6 +25,8 @@ export interface DetectedObject {
   x2: number;
   y2: number;
   confidence: 'high' | 'medium' | 'low';
+  // primary = dominant subject; secondary = contextual/background
+  primary: boolean;
 }
 
 export interface RegionFinding {
