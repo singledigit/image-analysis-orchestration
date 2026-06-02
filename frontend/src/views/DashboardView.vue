@@ -499,21 +499,20 @@ header {
   .body { flex-direction: row; overflow: visible; }
 
   .cta-panel {
-    width: 340px; flex-shrink: 0; box-sizing: border-box;
+    width: 420px; flex-shrink: 0; box-sizing: border-box;
     border-bottom: none; border-right: 1px solid var(--border);
     overflow-x: hidden;
-    padding: 2rem 1.75rem;
+    padding: 2rem 2rem;
     justify-content: flex-start;
-    /* Stick to viewport — sidebar never scrolls */
     position: sticky;
     top: 0;
-    height: calc(100vh - 53px); /* full height minus header */
+    height: calc(100vh - 53px);
     overflow-y: auto;
   }
-  .cta-headline { font-size: 1.9rem; }
-  .cta-url { font-size: 1rem; }
+  .cta-headline { font-size: 2rem; }
+  .cta-url { font-size: 1.05rem; letter-spacing: 0; }
   .stat-value { font-size: 3.5rem; }
-  .stat-label { font-size: 10px; }
+  .stat-label { font-size: 11px; }
   .explainer-list li { font-size: 12px; }
 
   .grid-area { overflow-y: visible; padding: 1.75rem; }
