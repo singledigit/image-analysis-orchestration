@@ -8,7 +8,7 @@ const s3 = new S3Client({});
 
 const channel = (executionId: string) => `/pipeline/${executionId}`;
 
-// ─── Step 1: preprocess ───────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────
 
 function buildRegions(gridSize: number): ImageRegion[] {
   const regions: ImageRegion[] = [];
@@ -17,10 +17,7 @@ function buildRegions(gridSize: number): ImageRegion[] {
     for (let col = 0; col < gridSize; col++) {
       const pct = Math.round(100 / gridSize);
       regions.push({
-        index,
-        row,
-        col,
-        gridSize,
+        index, row, col, gridSize,
         label: `region-${row}-${col} (rows ${row * pct}–${row * pct + pct}%, cols ${col * pct}–${col * pct + pct}%)`,
       });
       index++;
@@ -29,7 +26,14 @@ function buildRegions(gridSize: number): ImageRegion[] {
   return regions;
 }
 
-// ─── Step 2: per-region Bedrock inference ─────────────────────────
+async function fetchImageBase64(event: AnalysisPipelineEvent): Promise<string> {
+  if (event.imageS3Key && event.imageBucket) {
+    const obj = await s3.send(new GetObjectCommand({ Bucket: event.imageBucket, Key: event.imageS3Key }));
+    const bytes = await obj.Body!.transformToByteArray();
+    return Buffer.from(bytes).toString('base64');
+  }
+  return event.imageBase64!;
+}
 
 async function analyzeRegion(
   imageBase64: string,
@@ -42,7 +46,6 @@ async function analyzeRegion(
     `3) anything noteworthy for computer vision. Be concise (3-5 sentences).`;
 
   const analysis = await invokeNova(prompt, imageBase64, imageFormat);
-
   const objectMatch = analysis.match(/objects?[^:]*:\s*([^\n.]+)/i);
   const featureMatch = analysis.match(/features?[^:]*:\s*([^\n.]+)/i);
 
@@ -54,8 +57,6 @@ async function analyzeRegion(
     analysis,
   };
 }
-
-// ─── Step 3: synthesize ───────────────────────────────────────────
 
 async function synthesizeFindings(findings: RegionFinding[]): Promise<AnalysisSynthesis> {
   const n = Math.round(Math.sqrt(findings.length));
@@ -77,41 +78,31 @@ async function synthesizeFindings(findings: RegionFinding[]): Promise<AnalysisSy
 export const handler = withDurableExecution(async (event: AnalysisPipelineEvent, context: DurableContext) => {
   const executionId = event.executionId ?? event.imageId;
   const ch = channel(executionId);
+  const imageFormat = parseImageFormat(event.imageMediaType ?? 'image/jpeg');
 
   context.logger.info('Pipeline started', { imageId: event.imageId, executionId });
 
-  // ── Step 1: preprocess — load image from S3, extract regions ────────
-  const regions = await context.step('preprocess', async () => {
-    const gridSize = event.gridSize ?? 3;
-    const imageFormat = parseImageFormat(event.imageMediaType ?? 'image/jpeg');
-
-    // Load image bytes from S3 if supplied as a key, else use inline base64
-    let imageBase64: string;
-    if (event.imageS3Key && event.imageBucket) {
-      const obj = await s3.send(new GetObjectCommand({ Bucket: event.imageBucket, Key: event.imageS3Key }));
-      const bytes = await obj.Body!.transformToByteArray();
-      imageBase64 = Buffer.from(bytes).toString('base64');
-    } else {
-      imageBase64 = event.imageBase64!;
-    }
-
-    return { regions: buildRegions(gridSize), imageFormat, imageBase64 };
+  // ── Step 1: preprocess — build grid metadata only (no image bytes) ──
+  const preprocessed = await context.step('preprocess', async () => {
+    const gridSize = Number(event.gridSize ?? 3);
+    return { regions: buildRegions(gridSize), gridSize };
   });
 
-  await publish(ch, [{ type: 'step', step: 'preprocess', status: 'done', regionCount: regions.regions.length }]);
-  context.logger.info('Regions extracted', { count: regions.regions.length });
+  await publish(ch, [{ type: 'step', step: 'preprocess', status: 'done', regionCount: preprocessed.regions.length }]);
+  context.logger.info('Regions extracted', { count: preprocessed.regions.length });
 
-  // ── Step 2: parallel map ──────────────────────────────────────────
-  await publish(ch, [{ type: 'step', step: 'analyze', status: 'running', total: regions.regions.length }]);
+  // ── Step 2: parallel map — each region fetches image from S3 itself ──
+  await publish(ch, [{ type: 'step', step: 'analyze', status: 'running', total: preprocessed.regions.length }]);
 
   const mapResults = await context.map(
     'analyze-regions',
-    regions.regions,
+    preprocessed.regions,
     async (ctx: DurableContext, region: ImageRegion, index: number) => {
-      const finding = await ctx.step(`analyze-region-${index}`, async () =>
-        analyzeRegion(regions.imageBase64, regions.imageFormat, region)
-      );
-      // publish each region result as it completes
+      const finding = await ctx.step(`analyze-region-${index}`, async () => {
+        // Each region step fetches the image independently — bytes never checkpoint
+        const imageBase64 = await fetchImageBase64(event);
+        return analyzeRegion(imageBase64, imageFormat, region);
+      });
       await publish(ch, [{ type: 'region', index, status: 'done', finding }]);
       return finding;
     },
@@ -121,21 +112,17 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
   const successfulFindings = mapResults.succeeded().map(item => item.result as RegionFinding);
 
   if (mapResults.failureCount > 0) {
-    mapResults.failed().forEach(item => {
-      context.logger.error('Region analysis failed', { index: item.index, error: String(item.error) });
-    });
-    await publish(ch, [{ type: 'step', step: 'analyze', status: 'done',
-      successful: mapResults.successCount, failed: mapResults.failureCount }]);
-  } else {
-    await publish(ch, [{ type: 'step', step: 'analyze', status: 'done',
-      successful: mapResults.successCount, failed: 0 }]);
+    mapResults.failed().forEach(item =>
+      context.logger.error('Region failed', { index: item.index, error: String(item.error) })
+    );
   }
-
+  await publish(ch, [{ type: 'step', step: 'analyze', status: 'done',
+    successful: mapResults.successCount, failed: mapResults.failureCount }]);
   context.logger.info('Region analysis complete', {
     total: mapResults.totalCount, successful: mapResults.successCount, failed: mapResults.failureCount,
   });
 
-  // ── Step 3: synthesize ────────────────────────────────────────────
+  // ── Step 3: synthesize ─────────────────────────────────────────────
   await publish(ch, [{ type: 'step', step: 'synthesize', status: 'running' }]);
 
   const synthesis = await context.step('synthesize', async () =>
@@ -144,17 +131,17 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
 
   await publish(ch, [{ type: 'step', step: 'synthesize', status: 'done', synthesis }]);
 
-  // ── Step 4: store ─────────────────────────────────────────────────
+  // ── Step 4: store ──────────────────────────────────────────────────
   await publish(ch, [{ type: 'step', step: 'store', status: 'running' }]);
 
   const storedAt = await context.step('store', async () => {
-    console.log('[store] persisting result for imageId:', event.imageId);
+    context.logger.info('Storing result', { imageId: event.imageId });
     return new Date().toISOString();
   });
 
   const finalResult: AnalysisResult = {
     imageId: event.imageId,
-    regionCount: regions.regions.length,
+    regionCount: preprocessed.regions.length,
     successfulRegions: successfulFindings.length,
     findings: successfulFindings,
     synthesis,
