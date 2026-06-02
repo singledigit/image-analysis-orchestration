@@ -1,9 +1,12 @@
 export interface AnalysisPipelineEvent {
   imageId: string;
-  executionId?: string;  // AppSync channel suffix; defaults to imageId
-  imageBase64: string;
+  executionId?: string;
+  // Image supplied either as S3 reference (preferred) or inline base64
+  imageS3Key?: string;
+  imageBucket?: string;
+  imageBase64?: string;
   imageMediaType?: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
-  gridSize?: number; // rows × cols, default 3 → 9 regions
+  gridSize?: number;
 }
 
 export interface ImageRegion {

@@ -132,7 +132,7 @@ import { ref, reactive } from 'vue'
 import PipelineStep from './components/PipelineStep.vue'
 import { appSyncEvents } from './services/appSyncEvents'
 
-const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT as string
+const API_BASE = (import.meta.env.VITE_API_BASE as string).replace(/\/analyze$/, '')
 
 // ── State ──────────────────────────────────────────────────────
 const fileInput = ref<HTMLInputElement>()
@@ -202,19 +202,29 @@ async function runPipeline() {
   for (let i = 0; i < n * n; i++) cellStatus.value[i] = 'analyzing'
 
   try {
-    const res = await fetch(API_ENDPOINT, {
+    // Step 1: get presigned URL + executionId
+    const uploadRes = await fetch(`${API_BASE}/upload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageId: `demo-${Date.now()}`,
-        imageBase64: imageBase64.value,
-        imageMediaType: imageMediaType.value,
-        gridSize: n,
-      }),
+      body: JSON.stringify({ imageMediaType: imageMediaType.value }),
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+    if (!uploadRes.ok) throw new Error(`Upload init failed: ${await uploadRes.text()}`)
+    const { presignedUrl, s3Key, executionId } = await uploadRes.json()
 
-    const { channel, realtimeEndpoint, realtimeWsEndpoint, apiKey } = await res.json()
+    // Step 2: PUT image directly to S3
+    const blob = await (await fetch(`data:${imageMediaType.value};base64,${imageBase64.value}`)).blob()
+    const s3Res = await fetch(presignedUrl, { method: 'PUT', body: blob, headers: { 'Content-Type': imageMediaType.value } })
+    if (!s3Res.ok) throw new Error(`S3 upload failed: ${s3Res.status}`)
+
+    // Step 3: trigger pipeline
+    const analyzeRes = await fetch(`${API_BASE}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageId: `demo-${Date.now()}`, executionId, s3Key, imageMediaType: imageMediaType.value, gridSize: n }),
+    })
+    if (!analyzeRes.ok) throw new Error(`Analyze failed: ${await analyzeRes.text()}`)
+
+    const { channel, realtimeEndpoint, realtimeWsEndpoint, apiKey } = await analyzeRes.json()
 
     setStep('preprocess', 'running')
 
@@ -296,7 +306,7 @@ main { display: grid; grid-template-columns: 1fr 1fr; flex: 1; overflow: hidden;
 /* Drop zone */
 .drop-zone {
   flex: 1; border: 1px dashed var(--border-mid); border-radius: 3px;
-  position: relative; min-height: 280px; cursor: pointer;
+  position: relative; min-height: 280px; height: 0; cursor: pointer;
   transition: border-color .2s, background .2s; overflow: hidden;
 }
 .drop-zone:hover:not(.has-image), .drop-zone.drag-over {
@@ -315,8 +325,8 @@ main { display: grid; grid-template-columns: 1fr 1fr; flex: 1; overflow: hidden;
 .link-btn { background: none; border: none; color: var(--amber); font-family: var(--mono); font-size: inherit;
             cursor: pointer; text-decoration: underline; text-underline-offset: 3px; padding: 0; }
 
-.image-stage { position: absolute; inset: 0; }
-.image-stage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.image-stage { position: absolute; inset: 0; display: flex; }
+.image-stage img { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
 .grid-overlay { position: absolute; inset: 0; display: grid; pointer-events: none; }
 
 .grid-cell { border: 1px solid rgba(245,166,35,.2); position: relative; transition: background .3s, border-color .3s; }

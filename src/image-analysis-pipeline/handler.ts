@@ -1,7 +1,10 @@
 import { withDurableExecution, DurableContext } from '@aws/durable-execution-sdk-js';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { AnalysisPipelineEvent, ImageRegion, RegionFinding, AnalysisSynthesis, AnalysisResult } from './types';
 import { invokeNova, invokeNovaText, parseImageFormat } from './bedrock';
 import { publish } from './events';
+
+const s3 = new S3Client({});
 
 const channel = (executionId: string) => `/pipeline/${executionId}`;
 
@@ -77,11 +80,22 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
 
   context.logger.info('Pipeline started', { imageId: event.imageId, executionId });
 
-  // ── Step 1: preprocess ────────────────────────────────────────────
+  // ── Step 1: preprocess — load image from S3, extract regions ────────
   const regions = await context.step('preprocess', async () => {
     const gridSize = event.gridSize ?? 3;
     const imageFormat = parseImageFormat(event.imageMediaType ?? 'image/jpeg');
-    return { regions: buildRegions(gridSize), imageFormat };
+
+    // Load image bytes from S3 if supplied as a key, else use inline base64
+    let imageBase64: string;
+    if (event.imageS3Key && event.imageBucket) {
+      const obj = await s3.send(new GetObjectCommand({ Bucket: event.imageBucket, Key: event.imageS3Key }));
+      const bytes = await obj.Body!.transformToByteArray();
+      imageBase64 = Buffer.from(bytes).toString('base64');
+    } else {
+      imageBase64 = event.imageBase64!;
+    }
+
+    return { regions: buildRegions(gridSize), imageFormat, imageBase64 };
   });
 
   await publish(ch, [{ type: 'step', step: 'preprocess', status: 'done', regionCount: regions.regions.length }]);
@@ -95,7 +109,7 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
     regions.regions,
     async (ctx: DurableContext, region: ImageRegion, index: number) => {
       const finding = await ctx.step(`analyze-region-${index}`, async () =>
-        analyzeRegion(event.imageBase64, regions.imageFormat, region)
+        analyzeRegion(regions.imageBase64, regions.imageFormat, region)
       );
       // publish each region result as it completes
       await publish(ch, [{ type: 'region', index, status: 'done', finding }]);

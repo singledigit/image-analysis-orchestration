@@ -44,6 +44,24 @@ Resources:
       ApiId: !GetAtt RealtimeApi.ApiId
       Name: pipeline
 
+  # ── S3 bucket for image uploads ──────────────────────────────────
+
+  ImageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "cvpr-images-${AWS::AccountId}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-uploads
+            Status: Enabled
+            ExpirationInDays: 1
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ["*"]
+            AllowedMethods: [PUT]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+
   # ── HTTP API ──────────────────────────────────────────────────────
 
   Api:
@@ -66,10 +84,13 @@ Resources:
       Environment:
         Variables:
           PIPELINE_FUNCTION_ARN: !Ref ImageAnalysisPipeline.Alias
+          IMAGE_BUCKET: !Ref ImageBucket
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_WS_ENDPOINT: !Sub "wss://${RealtimeApi.Dns.Realtime}/event/realtime"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
       Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ImageBucket
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -78,6 +99,12 @@ Resources:
                 - !GetAtt ImageAnalysisPipeline.Arn
                 - !Sub "${ImageAnalysisPipeline.Arn}:*"
       Events:
+        Upload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /upload
+            Method: POST
         Analyze:
           Type: HttpApi
           Properties:
@@ -88,7 +115,7 @@ Resources:
           Type: HttpApi
           Properties:
             ApiId: !Ref Api
-            Path: /analyze
+            Path: /{proxy+}
             Method: OPTIONS
     Metadata:
       BuildMethod: esbuild
@@ -109,6 +136,7 @@ Resources:
       AutoPublishAlias: demo
       Environment:
         Variables:
+          IMAGE_BUCKET: !Ref ImageBucket
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
       DurableConfig:
@@ -123,6 +151,10 @@ Resources:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
               Resource: "*"   # Bedrock has no SAM policy template; scoped by action
+        - S3ReadPolicy:
+            BucketName: !Ref ImageBucket
+        - Version: "2012-10-17"
+          Statement:
             - Effect: Allow
               Action: appsync:EventPublish
               Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${RealtimeApi.ApiId}"
