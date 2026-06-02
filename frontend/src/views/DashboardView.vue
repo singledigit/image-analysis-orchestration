@@ -108,9 +108,15 @@
           <button class="detail-close" @click="selected = null">✕</button>
 
           <div class="detail-top">
-            <div class="detail-img">
+            <div class="detail-img" style="position:relative">
               <img v-if="selected.thumbnailUrl" :src="selected.thumbnailUrl" :alt="selected.imageId" />
               <div v-else class="card-img-placeholder large">◈</div>
+              <JarvisOverlay
+                v-if="selectedFindings.length"
+                :findings="selectedFindings"
+                :grid-size="Math.round(Math.sqrt(selected.regionCount ?? 9))"
+                :running="false"
+              />
             </div>
             <div class="detail-meta">
               <div class="result-meta-label">Scene type</div>
@@ -149,6 +155,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import QRCode from 'qrcode'
+import JarvisOverlay from '../components/JarvisOverlay.vue'
 import { appSyncEvents } from '../services/appSyncEvents'
 
 const API_BASE         = (import.meta.env.VITE_API_BASE as string).replace(/\/$/, '')

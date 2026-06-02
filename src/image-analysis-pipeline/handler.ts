@@ -3,7 +3,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { AnalysisPipelineEvent, ImageRegion, RegionFinding, AnalysisSynthesis, AnalysisResult } from './types';
+import { AnalysisPipelineEvent, ImageRegion, RegionFinding, DetectedObject, AnalysisSynthesis, AnalysisResult } from './types';
 import { invokeNova, invokeNovaText, parseImageFormat } from './bedrock';
 import { publish } from './events';
 
@@ -45,21 +45,56 @@ async function analyzeRegion(
   imageFormat: 'jpeg' | 'png' | 'gif' | 'webp',
   region: ImageRegion
 ): Promise<RegionFinding> {
-  const prompt =
-    `You are analyzing ${region.label} of an image (a ${region.gridSize}×${region.gridSize} grid). ` +
-    `Describe: 1) specific objects/entities visible, 2) visual features (textures, edges, colors), ` +
-    `3) anything noteworthy for computer vision. Be concise (3-5 sentences).`;
+  const pct = Math.round(100 / region.gridSize);
+  const x1base = region.col * pct / 100;
+  const y1base = region.row * pct / 100;
+  const cellW  = pct / 100;
+  const cellH  = pct / 100;
 
-  const analysis = await invokeNova(prompt, imageBase64, imageFormat);
-  const objectMatch = analysis.match(/objects?[^:]*:\s*([^\n.]+)/i);
-  const featureMatch = analysis.match(/features?[^:]*:\s*([^\n.]+)/i);
+  const prompt =
+    `You are analyzing ${region.label} of a ${region.gridSize}×${region.gridSize} image grid.\n\n` +
+    `This region covers x:[${x1base.toFixed(2)},${(x1base + cellW).toFixed(2)}] y:[${y1base.toFixed(2)},${(y1base + cellH).toFixed(2)}] ` +
+    `as normalized [0-1] coordinates of the FULL image.\n\n` +
+    `Return ONLY a JSON object with this exact structure (no markdown, no extra text):\n` +
+    `{\n` +
+    `  "analysis": "2-3 sentence description of what is visible",\n` +
+    `  "features": ["feature1", "feature2"],\n` +
+    `  "detectedObjects": [\n` +
+    `    {\n` +
+    `      "label": "object name",\n` +
+    `      "x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0,\n` +
+    `      "confidence": "high|medium|low"\n` +
+    `    }\n` +
+    `  ]\n` +
+    `}\n\n` +
+    `x1,y1,x2,y2 are normalized [0-1] relative to the FULL image. ` +
+    `Only include objects you can clearly see. Return empty array if nothing distinct is visible.`;
+
+  const raw = await invokeNova(prompt, imageBase64, imageFormat);
+
+  // Extract JSON — Nova sometimes wraps it in markdown fences
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  let parsed: { analysis: string; features: string[]; detectedObjects: DetectedObject[] } = {
+    analysis: raw.slice(0, 400),
+    features: [],
+    detectedObjects: [],
+  };
+
+  if (jsonMatch) {
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      // Partial parse failure — keep what we got
+    }
+  }
 
   return {
     regionIndex: region.index,
     regionLabel: region.label,
-    objects: objectMatch ? objectMatch[1].split(',').map(s => s.trim()) : [],
-    features: featureMatch ? featureMatch[1].split(',').map(s => s.trim()) : [],
-    analysis,
+    objects: (parsed.detectedObjects ?? []).map(o => o.label),
+    features: parsed.features ?? [],
+    analysis: parsed.analysis ?? raw.slice(0, 400),
+    detectedObjects: parsed.detectedObjects ?? [],
   };
 }
 

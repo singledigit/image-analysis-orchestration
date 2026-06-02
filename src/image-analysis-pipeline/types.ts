@@ -17,12 +17,23 @@ export interface ImageRegion {
   label: string; // e.g. "top-left (rows 0-33%, cols 0-33%)"
 }
 
+export interface DetectedObject {
+  label: string;
+  // Normalized coords [0-1] relative to the full image (not the region)
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  confidence: 'high' | 'medium' | 'low';
+}
+
 export interface RegionFinding {
   regionIndex: number;
   regionLabel: string;
   objects: string[];
   features: string[];
   analysis: string;
+  detectedObjects?: DetectedObject[];
 }
 
 export interface AnalysisSynthesis {

@@ -40,6 +40,7 @@
           <div v-else class="image-stage">
             <button class="reset-btn" :disabled="running" @click.stop="clearImage" title="Change image">✕</button>
             <img :src="imageDataUrl" alt="Preview" />
+            <JarvisOverlay :findings="findings" :grid-size="gridSize" :running="running" />
             <div
               class="grid-overlay"
               :style="{ gridTemplateColumns: `repeat(${gridSize}, 1fr)`, gridTemplateRows: `repeat(${gridSize}, 1fr)` }"
@@ -130,6 +131,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import PipelineStep from '../components/PipelineStep.vue'
+import JarvisOverlay from '../components/JarvisOverlay.vue'
 import { appSyncEvents } from '../services/appSyncEvents'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string).replace(/\/analyze$/, '')
