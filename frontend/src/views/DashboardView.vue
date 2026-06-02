@@ -14,50 +14,59 @@
       </div>
     </header>
 
-    <!-- ── QR + instructions strip ────────────────────────────── -->
-    <div class="cta-strip">
-      <canvas ref="qrCanvas" class="qr-code" />
-      <div class="cta-text">
-        <p class="cta-headline">Scan to analyse your own image</p>
-        <p class="cta-sub">{{ captureUrl }}</p>
-      </div>
-      <div class="cta-stats">
-        <div class="stat">
-          <div class="stat-value">{{ results.length }}</div>
-          <div class="stat-label">images analysed</div>
-        </div>
-        <div class="stat">
-          <div class="stat-value">{{ totalRegions }}</div>
-          <div class="stat-label">regions processed</div>
-        </div>
-      </div>
-    </div>
+    <div class="body">
 
-    <!-- ── Results grid ────────────────────────────────────────── -->
-    <main class="grid-area">
-      <p v-if="loading" class="empty-msg">Loading…</p>
-      <p v-else-if="results.length === 0" class="empty-msg">
-        No analyses yet — scan the QR code to be first.
-      </p>
-      <TransitionGroup v-else name="card-in" tag="div" class="results-grid">
-        <div
-          v-for="r in results"
-          :key="r.imageId"
-          class="result-card"
-          @click="selected = r"
-        >
-          <div class="card-img">
-            <img v-if="r.thumbnailUrl" :src="r.thumbnailUrl" :alt="r.imageId" loading="lazy" />
-            <div v-else class="card-img-placeholder">◈</div>
-            <div class="card-badge">{{ r.successfulRegions }}/{{ r.regionCount }}</div>
+      <!-- ── Left: QR + CTA ──────────────────────────────────── -->
+      <aside class="cta-panel">
+        <div class="qr-wrap">
+          <canvas ref="qrCanvas" class="qr-code" />
+        </div>
+        <p class="cta-headline">Scan to analyse<br>your own image</p>
+        <p class="cta-url">{{ captureUrlShort }}</p>
+        <div class="cta-stats">
+          <div class="stat">
+            <div class="stat-value">{{ results.length }}</div>
+            <div class="stat-label">analysed</div>
           </div>
-          <div class="card-body">
-            <div class="card-scene">{{ r.synthesis?.sceneType ?? r.sceneType ?? '—' }}</div>
-            <div class="card-time">{{ formatTime(r.storedAt) }}</div>
+          <div class="stat-divider" />
+          <div class="stat">
+            <div class="stat-value">{{ totalRegions }}</div>
+            <div class="stat-label">regions</div>
           </div>
         </div>
-      </TransitionGroup>
-    </main>
+        <div class="powered-by">
+          <span class="tag">Durable Functions</span>
+          <span class="tag">Bedrock Nova</span>
+        </div>
+      </aside>
+
+      <!-- ── Right: Results grid ─────────────────────────────── -->
+      <main class="grid-area">
+        <p v-if="loading" class="empty-msg">Loading…</p>
+        <p v-else-if="results.length === 0" class="empty-msg">
+          No analyses yet — scan the QR code to be first.
+        </p>
+        <TransitionGroup v-else name="card-in" tag="div" class="results-grid">
+          <div
+            v-for="r in results"
+            :key="r.imageId"
+            class="result-card"
+            @click="selected = r"
+          >
+            <div class="card-img">
+              <img v-if="r.thumbnailUrl" :src="r.thumbnailUrl" :alt="r.imageId" loading="lazy" />
+              <div v-else class="card-img-placeholder">◈</div>
+              <div class="card-badge">{{ r.successfulRegions }}/{{ r.regionCount }}</div>
+            </div>
+            <div class="card-body">
+              <div class="card-scene">{{ r.synthesis?.sceneType ?? r.sceneType ?? '—' }}</div>
+              <div class="card-time">{{ formatTime(r.storedAt) }}</div>
+            </div>
+          </div>
+        </TransitionGroup>
+      </main>
+
+    </div>
 
     <!-- ── Detail panel ────────────────────────────────────────── -->
     <Transition name="slide-up">
@@ -109,8 +118,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import QRCode from 'qrcode'
 import { appSyncEvents } from '../services/appSyncEvents'
 
-const API_BASE      = (import.meta.env.VITE_API_BASE as string).replace(/\/$/, '')
-const captureUrl    = `${location.origin}/capture`
+const API_BASE         = (import.meta.env.VITE_API_BASE as string).replace(/\/$/, '')
+const captureUrl       = `${location.origin}/capture`
+const captureUrlShort  = captureUrl.replace(/^https?:\/\//, '')
 
 const qrCanvas   = ref<HTMLCanvasElement>()
 const results    = ref<any[]>([])
@@ -197,8 +207,8 @@ async function subscribeToBoard() {
 async function renderQR() {
   if (!qrCanvas.value) return
   await QRCode.toCanvas(qrCanvas.value, captureUrl, {
-    width: 80,
-    margin: 1,
+    width: 220,
+    margin: 2,
     color: { dark: '#f5a623', light: '#0a0a0a' },
   })
 }
@@ -254,21 +264,45 @@ header {
 }
 .scan-btn:hover { opacity: .85; }
 
-/* CTA strip */
-.cta-strip {
-  display: flex; align-items: center; gap: 1.5rem;
-  padding: .75rem 1.5rem;
+/* Body split */
+.body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* CTA sidebar */
+.cta-panel {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1.25rem; padding: 1.5rem 1.25rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+  flex-shrink: 0;
 }
-.qr-code { border-radius: 4px; flex-shrink: 0; }
-.cta-text { flex: 1; min-width: 0; }
-.cta-headline { font-family: var(--serif); font-size: 1rem; color: var(--text); }
-.cta-sub { font-size: 11px; color: var(--text-muted); margin-top: .2rem; }
-.cta-stats { display: flex; gap: 1.5rem; }
+.qr-wrap {
+  padding: .75rem; background: #0a0a0a;
+  border: 1px solid var(--border-mid); border-radius: 6px;
+}
+.qr-code { display: block; border-radius: 3px; }
+.cta-headline {
+  font-family: var(--serif); font-size: 1.5rem; line-height: 1.25;
+  text-align: center; color: var(--text);
+}
+.cta-url {
+  font-size: 1rem; font-weight: 500; letter-spacing: .02em;
+  color: var(--amber); text-align: center; word-break: break-all;
+}
+.cta-stats { display: flex; align-items: center; gap: 1.5rem; }
 .stat { text-align: center; }
-.stat-value { font-family: var(--serif); font-size: 1.75rem; color: var(--amber); line-height: 1; }
-.stat-label { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-top: .2rem; }
+.stat-value { font-family: var(--serif); font-size: 2.5rem; color: var(--amber); line-height: 1; }
+.stat-label { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); margin-top: .25rem; }
+.stat-divider { width: 1px; height: 2.5rem; background: var(--border); }
+.powered-by { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: center; }
+.tag {
+  font-size: 9px; font-weight: 500; letter-spacing: .07em; text-transform: uppercase;
+  padding: .2rem .5rem; border: 1px solid var(--border-mid); color: var(--text-muted); border-radius: 3px;
+}
 
 /* Grid */
 .grid-area { flex: 1; padding: 1.25rem; overflow-y: auto; }
@@ -358,9 +392,24 @@ header {
 .slide-up-enter-from { opacity: 0; transform: translateY(40px); }
 .slide-up-leave-to   { opacity: 0; transform: translateY(40px); }
 
-/* Desktop: larger grid + sheet panel */
-@media (min-width: 768px) {
+/* Desktop: sidebar left + grid right */
+@media (min-width: 900px) {
+  .body { flex-direction: row; overflow: hidden; }
+
+  .cta-panel {
+    width: 280px; flex-shrink: 0;
+    border-bottom: none; border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 2rem 1.5rem;
+    justify-content: center;
+  }
+  .qr-wrap { padding: 1rem; }
+  .cta-headline { font-size: 1.75rem; }
+  .cta-url { font-size: 1.05rem; }
+  .stat-value { font-size: 3rem; }
+
+  .grid-area { overflow-y: auto; }
   .results-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+
   .detail-overlay { align-items: center; padding: 2rem; }
   .detail-panel { border-radius: 8px; max-height: 80vh; }
 }
