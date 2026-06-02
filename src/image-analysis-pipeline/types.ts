@@ -39,4 +39,5 @@ export interface AnalysisResult {
   findings: RegionFinding[];
   synthesis: AnalysisSynthesis;
   storedAt: string;
+  thumbnailUrl?: string;
 }

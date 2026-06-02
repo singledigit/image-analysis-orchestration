@@ -1,0 +1,367 @@
+<template>
+  <div class="dashboard-layout">
+
+    <!-- ── Header ─────────────────────────────────────────────── -->
+    <header>
+      <div class="header-left">
+        <span class="logo-mark">◈</span>
+        <span class="site-title">Image Analysis Orchestration</span>
+      </div>
+      <div class="header-right">
+        <span class="live-dot" :class="{ active: connected }" />
+        <span class="live-label">{{ connected ? 'LIVE' : 'CONNECTING' }}</span>
+        <a class="scan-btn" href="/capture">+ Capture</a>
+      </div>
+    </header>
+
+    <!-- ── QR + instructions strip ────────────────────────────── -->
+    <div class="cta-strip">
+      <canvas ref="qrCanvas" class="qr-code" />
+      <div class="cta-text">
+        <p class="cta-headline">Scan to analyse your own image</p>
+        <p class="cta-sub">{{ captureUrl }}</p>
+      </div>
+      <div class="cta-stats">
+        <div class="stat">
+          <div class="stat-value">{{ results.length }}</div>
+          <div class="stat-label">images analysed</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">{{ totalRegions }}</div>
+          <div class="stat-label">regions processed</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Results grid ────────────────────────────────────────── -->
+    <main class="grid-area">
+      <p v-if="loading" class="empty-msg">Loading…</p>
+      <p v-else-if="results.length === 0" class="empty-msg">
+        No analyses yet — scan the QR code to be first.
+      </p>
+      <TransitionGroup v-else name="card-in" tag="div" class="results-grid">
+        <div
+          v-for="r in results"
+          :key="r.imageId"
+          class="result-card"
+          @click="selected = r"
+        >
+          <div class="card-img">
+            <img v-if="r.thumbnailUrl" :src="r.thumbnailUrl" :alt="r.imageId" loading="lazy" />
+            <div v-else class="card-img-placeholder">◈</div>
+            <div class="card-badge">{{ r.successfulRegions }}/{{ r.regionCount }}</div>
+          </div>
+          <div class="card-body">
+            <div class="card-scene">{{ r.synthesis?.sceneType ?? r.sceneType ?? '—' }}</div>
+            <div class="card-time">{{ formatTime(r.storedAt) }}</div>
+          </div>
+        </div>
+      </TransitionGroup>
+    </main>
+
+    <!-- ── Detail panel ────────────────────────────────────────── -->
+    <Transition name="slide-up">
+      <div v-if="selected" class="detail-overlay" @click.self="selected = null">
+        <div class="detail-panel">
+          <button class="detail-close" @click="selected = null">✕</button>
+
+          <div class="detail-top">
+            <div class="detail-img">
+              <img v-if="selected.thumbnailUrl" :src="selected.thumbnailUrl" :alt="selected.imageId" />
+              <div v-else class="card-img-placeholder large">◈</div>
+            </div>
+            <div class="detail-meta">
+              <div class="result-meta-label">Scene type</div>
+              <div class="result-scene-value">{{ selected.synthesis?.sceneType ?? selected.sceneType }}</div>
+              <p class="result-description">{{ selected.synthesis?.overallDescription }}</p>
+              <div class="detail-stats">
+                <span>{{ selected.successfulRegions }}/{{ selected.regionCount }} regions</span>
+                <span>{{ formatTime(selected.storedAt) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="selected.synthesis?.cvInsights?.length" class="detail-section">
+            <div class="result-meta-label">CV Insights</div>
+            <ul class="insights-list">
+              <li v-for="(i, idx) in selected.synthesis.cvInsights" :key="idx">{{ i }}</li>
+            </ul>
+          </div>
+
+          <div v-if="selectedFindings.length" class="detail-section">
+            <div class="result-meta-label">Region Findings</div>
+            <div class="region-findings">
+              <div v-for="f in selectedFindings" :key="f.regionIndex" class="region-card">
+                <div class="region-card-label">{{ f.regionLabel?.split(' ')[0] }}</div>
+                <div class="region-card-text">{{ f.analysis }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import QRCode from 'qrcode'
+import { appSyncEvents } from '../services/appSyncEvents'
+
+const API_BASE      = (import.meta.env.VITE_API_BASE as string).replace(/\/$/, '')
+const captureUrl    = `${location.origin}/capture`
+
+const qrCanvas   = ref<HTMLCanvasElement>()
+const results    = ref<any[]>([])
+const selected   = ref<any>(null)
+const loading    = ref(true)
+const connected  = ref(false)
+
+const totalRegions = computed(() =>
+  results.value.reduce((s, r) => s + (r.successfulRegions ?? 0), 0)
+)
+
+const selectedFindings = computed(() => {
+  if (!selected.value) return []
+  // Full findings may be on the item or need a separate fetch
+  return selected.value.findings ?? []
+})
+
+// ── Load initial results ───────────────────────────────────────
+async function loadResults() {
+  try {
+    const res = await fetch(`${API_BASE}/results`)
+    results.value = await res.json()
+  } catch (e) {
+    console.error('Failed to load results', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ── Fetch full detail when selecting a card ────────────────────
+async function fetchDetail(imageId: string) {
+  try {
+    const res = await fetch(`${API_BASE}/results/${encodeURIComponent(imageId)}`)
+    if (res.ok) selected.value = await res.json()
+  } catch {}
+}
+
+// Watch for selection changes to load full findings
+const _watch = computed(() => selected.value?.imageId)
+let lastId = ''
+setInterval(() => {
+  const id = _watch.value
+  if (id && id !== lastId && !selected.value?.findings?.length) {
+    lastId = id
+    fetchDetail(id)
+  }
+}, 200)
+
+// ── AppSync subscription for live dashboard updates ────────────
+async function subscribeToBoard() {
+  // Use a separate config call to get realtime details
+  // We piggyback on the /upload endpoint to get connection info
+  try {
+    const res = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageMediaType: 'image/jpeg' }),
+    })
+    if (!res.ok) return
+    const { } = await res.json() // just need the side-effect of the call
+
+    // Re-use the static API key from VITE env (injected at build)
+    const wsEndpoint  = import.meta.env.VITE_REALTIME_WS_ENDPOINT as string
+    const httpEndpoint = import.meta.env.VITE_REALTIME_ENDPOINT as string
+    const apiKey       = import.meta.env.VITE_REALTIME_API_KEY as string
+
+    if (!wsEndpoint || !apiKey) return
+
+    appSyncEvents.configure(httpEndpoint, wsEndpoint, apiKey)
+    await appSyncEvents.connect()
+    connected.value = true
+
+    appSyncEvents.subscribe('/pipeline/dashboard', (event: any) => {
+      if (event.type === 'new-result') {
+        results.value.unshift(event.result)
+      }
+    })
+  } catch (e) {
+    console.warn('Realtime subscription failed', e)
+  }
+}
+
+// ── QR code ────────────────────────────────────────────────────
+async function renderQR() {
+  if (!qrCanvas.value) return
+  await QRCode.toCanvas(qrCanvas.value, captureUrl, {
+    width: 80,
+    margin: 1,
+    color: { dark: '#f5a623', light: '#0a0a0a' },
+  })
+}
+
+function formatTime(iso: string) {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    })
+  } catch { return iso }
+}
+
+onMounted(async () => {
+  await loadResults()
+  renderQR()
+  subscribeToBoard()
+})
+
+onUnmounted(() => appSyncEvents.disconnect())
+</script>
+
+<style scoped>
+.dashboard-layout {
+  display: flex; flex-direction: column;
+  min-height: 100vh; background: var(--bg);
+}
+
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .75rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: sticky; top: 0; z-index: 50; flex-shrink: 0;
+}
+.header-left { display: flex; align-items: center; gap: .6rem; }
+.logo-mark { font-size: 1.1rem; color: var(--amber); animation: pulse 3s ease-in-out infinite; }
+.site-title { font-family: var(--serif); font-size: 1rem; }
+.header-right { display: flex; align-items: center; gap: .75rem; }
+
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted);
+  transition: background .3s;
+}
+.live-dot.active { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.live-label { font-size: 10px; letter-spacing: .12em; color: var(--text-muted); }
+
+.scan-btn {
+  font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase;
+  padding: .35rem .8rem; background: var(--amber); color: #0a0a0a;
+  border-radius: 3px; text-decoration: none; white-space: nowrap;
+  transition: opacity .2s;
+}
+.scan-btn:hover { opacity: .85; }
+
+/* CTA strip */
+.cta-strip {
+  display: flex; align-items: center; gap: 1.5rem;
+  padding: .75rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.qr-code { border-radius: 4px; flex-shrink: 0; }
+.cta-text { flex: 1; min-width: 0; }
+.cta-headline { font-family: var(--serif); font-size: 1rem; color: var(--text); }
+.cta-sub { font-size: 11px; color: var(--text-muted); margin-top: .2rem; }
+.cta-stats { display: flex; gap: 1.5rem; }
+.stat { text-align: center; }
+.stat-value { font-family: var(--serif); font-size: 1.75rem; color: var(--amber); line-height: 1; }
+.stat-label { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-top: .2rem; }
+
+/* Grid */
+.grid-area { flex: 1; padding: 1.25rem; overflow-y: auto; }
+
+.empty-msg {
+  color: var(--text-muted); font-size: 13px; text-align: center;
+  padding: 4rem 2rem;
+}
+
+.results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: .75rem;
+}
+
+.result-card {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+  overflow: hidden; cursor: pointer;
+  transition: border-color .2s, transform .15s;
+}
+.result-card:hover { border-color: var(--amber); transform: translateY(-2px); }
+
+.card-img {
+  position: relative; aspect-ratio: 1;
+  background: var(--bg-raised); overflow: hidden;
+}
+.card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-img-placeholder {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 2rem; color: var(--text-muted);
+}
+.card-img-placeholder.large { font-size: 3rem; }
+.card-badge {
+  position: absolute; bottom: .35rem; right: .35rem;
+  background: rgba(10,10,10,.85); border: 1px solid var(--border-mid);
+  border-radius: 2px; font-size: 9px; padding: .15rem .4rem;
+  color: var(--amber);
+}
+.card-body { padding: .5rem .6rem; }
+.card-scene { font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-time { font-size: 10px; color: var(--text-muted); margin-top: .15rem; }
+
+/* Detail overlay */
+.detail-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: flex; align-items: flex-end; justify-content: center;
+  z-index: 200; padding: 0;
+}
+.detail-panel {
+  width: 100%; max-width: 680px; max-height: 85vh;
+  background: var(--bg-panel); border: 1px solid var(--border-mid);
+  border-radius: 8px 8px 0 0; padding: 1.25rem;
+  overflow-y: auto; position: relative;
+  display: flex; flex-direction: column; gap: 1.25rem;
+}
+.detail-close {
+  position: absolute; top: 1rem; right: 1rem;
+  background: var(--bg-raised); border: 1px solid var(--border-mid);
+  color: var(--text-dim); border-radius: 50%; width: 28px; height: 28px;
+  font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: color .15s;
+}
+.detail-close:hover { color: var(--text); }
+.detail-top { display: flex; gap: 1rem; }
+.detail-img { width: 140px; flex-shrink: 0; border-radius: 4px; overflow: hidden; aspect-ratio: 1; background: var(--bg-raised); }
+.detail-img img { width: 100%; height: 100%; object-fit: cover; }
+.detail-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .5rem; }
+.detail-stats { display: flex; gap: 1rem; font-size: 10px; color: var(--text-muted); margin-top: auto; }
+.detail-section { display: flex; flex-direction: column; gap: .5rem; }
+
+.result-meta-label { font-size: 9px; letter-spacing: .15em; text-transform: uppercase; color: var(--text-muted); }
+.result-scene-value { font-family: var(--serif); font-size: 1.3rem; line-height: 1.2; }
+.result-description { font-size: 12px; line-height: 1.7; color: var(--text-dim); border-left: 2px solid var(--border-mid); padding-left: .75rem; }
+.insights-list { list-style: none; display: flex; flex-direction: column; gap: .35rem; margin-top: .25rem; }
+.insights-list li { font-size: 11px; color: var(--text-dim); padding-left: 1.25rem; position: relative; line-height: 1.6; }
+.insights-list li::before { content: '→'; position: absolute; left: 0; color: var(--amber); }
+.region-findings { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+.region-card { background: var(--bg-raised); border: 1px solid var(--border); border-radius: 3px; padding: .5rem .6rem; }
+.region-card-label { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--amber); margin-bottom: .2rem; }
+.region-card-text { font-size: 10px; line-height: 1.6; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Transitions */
+.card-in-enter-active { animation: fadeUp .35s ease; }
+.card-in-move { transition: transform .3s ease; }
+.slide-up-enter-active { transition: opacity .25s ease, transform .25s ease; }
+.slide-up-leave-active { transition: opacity .2s ease, transform .2s ease; }
+.slide-up-enter-from { opacity: 0; transform: translateY(40px); }
+.slide-up-leave-to   { opacity: 0; transform: translateY(40px); }
+
+/* Desktop: larger grid + sheet panel */
+@media (min-width: 768px) {
+  .results-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+  .detail-overlay { align-items: center; padding: 2rem; }
+  .detail-panel { border-radius: 8px; max-height: 80vh; }
+}
+</style>

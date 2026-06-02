@@ -1,10 +1,15 @@
 import { withDurableExecution, DurableContext } from '@aws/durable-execution-sdk-js';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { AnalysisPipelineEvent, ImageRegion, RegionFinding, AnalysisSynthesis, AnalysisResult } from './types';
 import { invokeNova, invokeNovaText, parseImageFormat } from './bedrock';
 import { publish } from './events';
 
-const s3 = new S3Client({});
+const s3  = new S3Client({});
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const RESULTS_TABLE = process.env.RESULTS_TABLE!;
 
 const channel = (executionId: string) => `/pipeline/${executionId}`;
 
@@ -139,8 +144,34 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
   await publish(ch, [{ type: 'step', step: 'store', status: 'running' }]);
 
   const storedAt = await context.step('store', async () => {
-    context.logger.info('Storing result', { imageId: event.imageId });
-    return new Date().toISOString();
+    const now = new Date().toISOString();
+
+    // Generate a 7-day presigned GET URL for the thumbnail
+    const thumbnailUrl = event.imageS3Key
+      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: event.imageBucket, Key: event.imageS3Key }), { expiresIn: 604800 })
+      : undefined;
+
+    const record = {
+      imageId: event.imageId,
+      executionId,
+      storedAt: now,
+      imageS3Key: event.imageS3Key,
+      thumbnailUrl,
+      regionCount: preprocessed.regions.length,
+      successfulRegions: successfulFindings.length,
+      synthesis,
+      // Store only slim findings in DDB to keep item under 400KB
+      findings: successfulFindings.map(f => ({
+        regionIndex: f.regionIndex,
+        regionLabel: f.regionLabel,
+        analysis: f.analysis.slice(0, 400),
+      })),
+    };
+
+    await ddb.send(new PutCommand({ TableName: RESULTS_TABLE, Item: record }));
+    context.logger.info('Stored result', { imageId: event.imageId });
+
+    return { storedAt: now, thumbnailUrl };
   });
 
   const finalResult: AnalysisResult = {
@@ -149,11 +180,22 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
     successfulRegions: successfulFindings.length,
     findings: successfulFindings,
     synthesis,
-    storedAt,
+    storedAt: storedAt.storedAt,
+    thumbnailUrl: storedAt.thumbnailUrl,
   };
 
   await publish(ch, [{ type: 'complete', result: finalResult }]);
-  context.logger.info('Pipeline complete', { imageId: event.imageId, sceneType: synthesis.sceneType });
 
+  // Notify the dashboard channel so the board updates live
+  await publish('/pipeline/dashboard', [{ type: 'new-result', result: {
+    imageId: finalResult.imageId,
+    storedAt: finalResult.storedAt,
+    thumbnailUrl: finalResult.thumbnailUrl,
+    sceneType: finalResult.synthesis.sceneType,
+    regionCount: finalResult.regionCount,
+    successfulRegions: finalResult.successfulRegions,
+  }}]);
+
+  context.logger.info('Pipeline complete', { imageId: event.imageId, sceneType: synthesis.sceneType });
   return finalResult;
 });

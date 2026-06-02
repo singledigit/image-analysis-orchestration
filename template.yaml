@@ -44,6 +44,16 @@ Resources:
       ApiId: !GetAtt RealtimeApi.ApiId
       Name: pipeline
 
+  # ── DynamoDB — results store ──────────────────────────────────────
+
+  ResultsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: cvpr-results
+      PrimaryKey:
+        Name: imageId
+        Type: String
+
   # ── S3 bucket for image uploads ──────────────────────────────────
 
   ImageBucket:
@@ -54,11 +64,11 @@ Resources:
         Rules:
           - Id: expire-uploads
             Status: Enabled
-            ExpirationInDays: 1
+            ExpirationInDays: 7   # keep long enough for dashboard thumbnails
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins: ["*"]
-            AllowedMethods: [PUT]
+            AllowedMethods: [GET, PUT]
             AllowedHeaders: ["*"]
             MaxAge: 3000
 
@@ -69,10 +79,10 @@ Resources:
     Properties:
       CorsConfiguration:
         AllowOrigins: ["*"]
-        AllowMethods: [POST, OPTIONS]
+        AllowMethods: [GET, POST, OPTIONS]
         AllowHeaders: [Content-Type]
 
-  # ── API handler — async invoke + return AppSync connection info ───
+  # ── API handler ───────────────────────────────────────────────────
 
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -85,12 +95,15 @@ Resources:
         Variables:
           PIPELINE_FUNCTION_ARN: !Ref ImageAnalysisPipeline.Alias
           IMAGE_BUCKET: !Ref ImageBucket
+          RESULTS_TABLE: !Ref ResultsTable
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_WS_ENDPOINT: !Sub "wss://${RealtimeApi.Dns.Realtime}/event/realtime"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ImageBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref ResultsTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -111,6 +124,18 @@ Resources:
             ApiId: !Ref Api
             Path: /analyze
             Method: POST
+        GetResults:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /results
+            Method: GET
+        GetResult:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /results/{imageId}
+            Method: GET
         Options:
           Type: HttpApi
           Properties:
@@ -137,6 +162,7 @@ Resources:
       Environment:
         Variables:
           IMAGE_BUCKET: !Ref ImageBucket
+          RESULTS_TABLE: !Ref ResultsTable
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
       DurableConfig:
@@ -144,17 +170,17 @@ Resources:
         RetentionPeriodInDays: 1
       Policies:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicDurableExecutionRolePolicy
+        - S3ReadPolicy:
+            BucketName: !Ref ImageBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ResultsTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
-              Resource: "*"   # Bedrock has no SAM policy template; scoped by action
-        - S3ReadPolicy:
-            BucketName: !Ref ImageBucket
-        - Version: "2012-10-17"
-          Statement:
+              Resource: "*"
             - Effect: Allow
               Action: appsync:EventPublish
               Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${RealtimeApi.ApiId}"
@@ -202,12 +228,10 @@ Resources:
         DefaultCacheBehavior:
           TargetOriginId: FrontendS3
           ViewerProtocolPolicy: redirect-to-https
-          # No caching — every request goes to S3
-          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad   # CachingDisabled managed policy
-          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # CORS-S3Origin
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad       # CachingDisabled
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf # CORS-S3Origin
           AllowedMethods: [GET, HEAD, OPTIONS]
         CustomErrorResponses:
-          # SPA fallback — all 403/404 serve index.html for client-side routing
           - ErrorCode: 403
             ResponseCode: 200
             ResponsePagePath: /index.html
@@ -242,9 +266,9 @@ Resources:
 
 Outputs:
 
-  ApiUrl:
-    Description: HTTP API endpoint
-    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/analyze"
+  ApiBase:
+    Description: HTTP API base URL
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"
 
   RealtimeEndpoint:
     Description: AppSync Events HTTP endpoint
@@ -257,14 +281,6 @@ Outputs:
   RealtimeApiKey:
     Description: AppSync Events API key
     Value: !GetAtt RealtimeApiKey.ApiKey
-
-  FunctionArn:
-    Description: Unqualified function ARN
-    Value: !GetAtt ImageAnalysisPipeline.Arn
-
-  AliasArn:
-    Description: Qualified alias ARN — use this to invoke
-    Value: !Ref ImageAnalysisPipeline.Alias
 
   FrontendUrl:
     Description: CloudFront URL for the frontend

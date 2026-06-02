@@ -1,12 +1,16 @@
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, ScanCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 
 const lambda = new LambdaClient({});
 const s3     = new S3Client({});
+const ddb    = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 const PIPELINE_FUNCTION_ARN = process.env.PIPELINE_FUNCTION_ARN!;
 const IMAGE_BUCKET          = process.env.IMAGE_BUCKET!;
+const RESULTS_TABLE         = process.env.RESULTS_TABLE!;
 const REALTIME_ENDPOINT     = process.env.REALTIME_ENDPOINT!;
 const REALTIME_WS_ENDPOINT  = process.env.REALTIME_WS_ENDPOINT!;
 const REALTIME_API_KEY      = process.env.REALTIME_API_KEY!;
@@ -17,7 +21,24 @@ export async function handler(event: AWSLambda.APIGatewayProxyEventV2) {
 
   if (method === 'OPTIONS') return cors(204, '');
 
-  // ── POST /upload → return presigned PUT URL ───────────────────
+  // ── GET /results — list all results newest first ──────────────
+  if (method === 'GET' && path === '/results') {
+    const res = await ddb.send(new ScanCommand({ TableName: RESULTS_TABLE }));
+    const items = (res.Items ?? []).sort((a, b) =>
+      (b.storedAt ?? '').localeCompare(a.storedAt ?? '')
+    );
+    return cors(200, JSON.stringify(items));
+  }
+
+  // ── GET /results/:imageId — single result ─────────────────────
+  if (method === 'GET' && path.startsWith('/results/')) {
+    const imageId = decodeURIComponent(path.split('/results/')[1]);
+    const res = await ddb.send(new GetCommand({ TableName: RESULTS_TABLE, Key: { imageId } }));
+    if (!res.Item) return cors(404, JSON.stringify({ error: 'Not found' }));
+    return cors(200, JSON.stringify(res.Item));
+  }
+
+  // ── POST /upload → presigned PUT URL ─────────────────────────
   if (method === 'POST' && path === '/upload') {
     let body: Record<string, string>;
     try { body = JSON.parse(event.body ?? '{}'); }
@@ -37,7 +58,7 @@ export async function handler(event: AWSLambda.APIGatewayProxyEventV2) {
     return cors(200, JSON.stringify({ presignedUrl, s3Key, executionId }));
   }
 
-  // ── POST /analyze → async invoke pipeline ─────────────────────
+  // ── POST /analyze → async pipeline trigger ────────────────────
   if (method === 'POST' && path === '/analyze') {
     let body: Record<string, unknown>;
     try { body = JSON.parse(event.body ?? '{}'); }
@@ -71,7 +92,7 @@ function cors(statusCode: number, body: string) {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     },
     body,
