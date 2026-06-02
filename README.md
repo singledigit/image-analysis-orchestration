@@ -14,22 +14,22 @@ The core insight: CV researchers already think in pipelines — data loading, au
 
 ```mermaid
 graph TD
-    Browser["Browser\n(Dashboard / Capture)"]
-    CF["CloudFront\n(no-cache)"]
-    S3F["S3\nfrontend assets"]
-    APIGW["API Gateway\nHTTP API"]
-    ApiLambda["API Lambda\nPOST /upload\nPOST /analyze\nGET /results"]
-    S3I["S3\nimage uploads\n(presigned PUT)"]
-    Pipeline["Lambda Durable Function\nimage-analysis-pipeline"]
-    Bedrock["Amazon Bedrock\nNova Lite\n(per-region inference)"]
-    DDB["DynamoDB\ncvpr-results"]
-    AppSync["AppSync Events API\nWebSocket pub/sub"]
+    Browser["Browser"]
+    CF["CloudFront"]
+    S3F["S3 — frontend"]
+    APIGW["API Gateway"]
+    ApiLambda["API Lambda"]
+    S3I["S3 — image uploads"]
+    Pipeline["Durable Pipeline Lambda"]
+    Bedrock["Bedrock Nova Lite"]
+    DDB["DynamoDB"]
+    AppSync["AppSync Events API"]
 
     Browser -->|HTTPS| CF
     CF --> S3F
 
     Browser -->|POST /upload| APIGW
-    Browser -->|PUT image| S3I
+    Browser -->|PUT image direct| S3I
     Browser -->|POST /analyze| APIGW
     Browser -->|GET /results| APIGW
     APIGW --> ApiLambda
@@ -39,21 +39,21 @@ graph TD
 
     Pipeline -->|GetObject| S3I
 
-    subgraph "Durable Execution — 4 checkpointed steps"
-        Step1["Step 1: preprocess\nbuild N×N region grid"]
-        Step2["Step 2: context.map\nN concurrent Bedrock calls"]
-        Step3["Step 3: synthesize\naggregate findings"]
-        Step4["Step 4: store\nwrite DynamoDB + presign thumbnail"]
+    subgraph Durable ["Durable Execution — 4 steps"]
+        Step1["preprocess — build region grid"]
+        Step2["context.map — N concurrent Bedrock calls"]
+        Step3["synthesize — aggregate findings"]
+        Step4["store — write DDB + presign thumbnail"]
         Step1 --> Step2 --> Step3 --> Step4
     end
 
     Pipeline --> Step1
     Step2 -->|InvokeModel| Bedrock
     Step4 --> DDB
-    Step4 -->|publish /pipeline/dashboard| AppSync
-    Pipeline -->|publish /pipeline/:executionId| AppSync
+    Step4 -->|publish dashboard event| AppSync
+    Pipeline -->|publish step + region events| AppSync
 
-    AppSync -->|WebSocket events| Browser
+    AppSync -->|WebSocket| Browser
 ```
 
 ### Request flow
