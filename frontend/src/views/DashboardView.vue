@@ -30,17 +30,17 @@
         <div class="cta-stats">
           <div class="stat">
             <div class="stat-value">{{ results.length }}</div>
-            <div class="stat-label">images analysed</div>
+            <div class="stat-label">Images</div>
           </div>
           <div class="stat-divider" />
           <div class="stat">
             <div class="stat-value">{{ totalRegions }}</div>
-            <div class="stat-label">regions processed</div>
+            <div class="stat-label">Regions</div>
           </div>
           <div class="stat-divider" />
           <div class="stat">
             <div class="stat-value">{{ avgRegions }}</div>
-            <div class="stat-label">avg regions/image</div>
+            <div class="stat-label">Avg / image</div>
           </div>
         </div>
 
@@ -362,7 +362,8 @@ header {
 .stat-label {
   font-size: 9px; letter-spacing: .06em; text-transform: uppercase;
   color: var(--text-muted); margin-top: .2rem;
-  white-space: normal; line-height: 1.3; word-break: break-word;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  width: 100%;
 }
 .stat-divider { width: 1px; height: 2rem; background: var(--border); flex-shrink: 0; }
 .powered-by { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: center; }
