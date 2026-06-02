@@ -24,7 +24,6 @@
           <canvas ref="qrCanvas" class="qr-code" />
         </div>
         <p class="cta-headline">Scan to analyse<br>your own image</p>
-        <p class="cta-url">{{ captureUrlShort }}</p>
 
         <!-- Live stats -->
         <div class="cta-stats">
