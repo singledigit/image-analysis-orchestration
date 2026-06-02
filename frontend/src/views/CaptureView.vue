@@ -136,10 +136,18 @@ import { appSyncEvents } from '../services/appSyncEvents'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string).replace(/\/analyze$/, '')
 
-const fileInput    = ref<HTMLInputElement>()
-const imageDataUrl = ref<string | null>(null)
-const imageBase64  = ref<string | null>(null)
+const fileInput      = ref<HTMLInputElement>()
+const imageFile      = ref<File | null>(null)
+const imageDataUrl   = ref<string | null>(null)
+const imageBase64    = ref<string | null>(null)
 const imageMediaType = ref('image/jpeg')
+
+function base64ToBlob(b64: string, type: string): Blob {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type })
+}
 const isDragging   = ref(false)
 const gridSize     = ref(3)
 const running      = ref(false)
@@ -162,6 +170,7 @@ function setStep(key: string, status: string, badge = '') {
 
 function clearImage() {
   appSyncEvents.disconnect()
+  imageFile.value = null
   imageDataUrl.value = null
   imageBase64.value = null
   if (fileInput.value) fileInput.value.value = ''
@@ -170,6 +179,7 @@ function clearImage() {
 }
 
 function loadFile(file: File) {
+  imageFile.value = file
   imageMediaType.value = file.type || 'image/jpeg'
   const reader = new FileReader()
   reader.onload = (e) => {
@@ -217,8 +227,9 @@ async function runPipeline() {
     if (!uploadRes.ok) throw new Error(`Upload init failed: ${await uploadRes.text()}`)
     const { presignedUrl, s3Key, executionId } = await uploadRes.json()
 
-    const blob = await (await fetch(`data:${imageMediaType.value};base64,${imageBase64.value}`)).blob()
-    const s3Res = await fetch(presignedUrl, { method: 'PUT', body: blob, headers: { 'Content-Type': imageMediaType.value } })
+    // Use the original File object directly — avoids data: URL fetch issues on mobile Safari
+    const body = imageFile.value ?? base64ToBlob(imageBase64.value!, imageMediaType.value)
+    const s3Res = await fetch(presignedUrl, { method: 'PUT', body, headers: { 'Content-Type': imageMediaType.value } })
     if (!s3Res.ok) throw new Error(`S3 upload failed: ${s3Res.status}`)
 
     const analyzeRes = await fetch(`${API_BASE}/analyze`, {
