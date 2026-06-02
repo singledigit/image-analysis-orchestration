@@ -475,18 +475,19 @@ header {
   .body { flex-direction: row; overflow: hidden; }
 
   .cta-panel {
-    width: 260px; flex-shrink: 0; box-sizing: border-box;
+    width: 340px; flex-shrink: 0; box-sizing: border-box;
     border-bottom: none; border-right: 1px solid var(--border);
     overflow-y: auto; overflow-x: hidden;
-    padding: 1.75rem 1.25rem;
+    padding: 2rem 1.75rem;
     justify-content: center;
   }
-  .cta-headline { font-size: 1.6rem; }
-  .cta-url { font-size: .9rem; }
-  .stat-value { font-size: 2.5rem; }
+  .cta-headline { font-size: 1.75rem; }
+  .cta-url { font-size: 1rem; }
+  .stat-value { font-size: 2.75rem; }
 
   .grid-area { overflow-y: auto; }
-  .results-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+  /* Fixed 4-column grid — cards scroll vertically */
+  .results-grid { grid-template-columns: repeat(4, 1fr); gap: 1rem; align-content: start; }
 
   .detail-overlay { align-items: center; padding: 2rem; }
   .detail-panel { border-radius: 8px; max-height: 80vh; }
