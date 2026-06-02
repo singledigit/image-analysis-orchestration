@@ -1,6 +1,6 @@
 # Image Analysis Orchestration
 
-A CVPR 2026 booth demo showing how **AWS Lambda Durable Functions** map directly onto production computer-vision pipelines. Live demo: https://d1ij24bha6vmyb.cloudfront.net Users scan a QR code, submit an image from their phone, and watch a 4-step durable pipeline fan out across a 3×3 grid of concurrent Bedrock Nova invocations in real time on a shared display.
+A CVPR 2026 booth demo showing how **AWS Lambda Durable Functions** map directly onto production computer-vision pipelines. Users scan a QR code, submit an image from their phone, and watch a 4-step durable pipeline fan out across a 3×3 grid of concurrent Bedrock Nova invocations in real time on a shared display.
 
 ## What this demo shows
 
