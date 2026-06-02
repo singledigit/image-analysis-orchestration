@@ -79,8 +79,8 @@ Resources:
     Properties:
       CorsConfiguration:
         AllowOrigins: ["*"]
-        AllowMethods: [GET, POST, OPTIONS]
-        AllowHeaders: [Content-Type]
+        AllowMethods: [GET, POST, DELETE, OPTIONS]
+        AllowHeaders: [Content-Type, X-Admin-Key]
 
   # ── API handler ───────────────────────────────────────────────────
 
@@ -99,10 +99,11 @@ Resources:
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_WS_ENDPOINT: !Sub "wss://${RealtimeApi.Dns.Realtime}/event/realtime"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
+          ADMIN_KEY: "{{resolve:ssm:/cvpr/admin-key}}"
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ImageBucket
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref ResultsTable
         - Version: "2012-10-17"
           Statement:
@@ -136,6 +137,12 @@ Resources:
             ApiId: !Ref Api
             Path: /results/{imageId}
             Method: GET
+        DeleteResult:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /results/{imageId}
+            Method: DELETE
         Options:
           Type: HttpApi
           Properties:

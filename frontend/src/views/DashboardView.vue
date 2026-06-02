@@ -95,6 +95,12 @@
               />
               <div class="card-img-placeholder">◈</div>
               <div class="card-badge">{{ r.successfulRegions }}/{{ r.regionCount }}</div>
+              <button
+                v-if="isAdmin"
+                class="delete-btn"
+                title="Delete"
+                @click.stop="deleteResult(r.imageId)"
+              >✕</button>
             </div>
             <div class="card-body">
               <div class="card-scene">{{ r.synthesis?.sceneType ?? r.sceneType ?? '—' }}</div>
@@ -166,6 +172,9 @@ import { appSyncEvents } from '../services/appSyncEvents'
 const API_BASE         = (import.meta.env.VITE_API_BASE as string).replace(/\/$/, '')
 const captureUrl       = `${location.origin}/capture`
 const captureUrlShort  = captureUrl.replace(/^https?:\/\//, '')
+const ADMIN_KEY        = import.meta.env.VITE_ADMIN_KEY as string
+
+const isAdmin = new URLSearchParams(location.search).has('admin')
 
 const qrCanvas   = ref<HTMLCanvasElement>()
 const results    = ref<any[]>([])
@@ -261,6 +270,24 @@ async function renderQR() {
     margin: 2,
     color: { dark: '#f5a623', light: '#0a0a0a' },
   })
+}
+
+async function deleteResult(imageId: string) {
+  if (!confirm(`Delete "${imageId}"?`)) return
+  try {
+    const res = await fetch(`${API_BASE}/results/${encodeURIComponent(imageId)}`, {
+      method: 'DELETE',
+      headers: { 'X-Admin-Key': ADMIN_KEY },
+    })
+    if (res.ok) {
+      results.value = results.value.filter(r => r.imageId !== imageId)
+      if (selected.value?.imageId === imageId) selected.value = null
+    } else {
+      alert('Delete failed: ' + (await res.text()))
+    }
+  } catch (e: any) {
+    alert('Delete error: ' + e.message)
+  }
 }
 
 function formatTime(iso: string) {
@@ -438,6 +465,15 @@ header {
   border-radius: 2px; font-size: 11px; font-weight: 500; padding: .2rem .5rem;
   color: var(--amber);
 }
+.delete-btn {
+  position: absolute; top: .4rem; left: .4rem; z-index: 10;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(224,85,85,.85); border: none;
+  color: #fff; font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .15s;
+}
+.result-card:hover .delete-btn { opacity: 1; }
 .card-body { padding: .65rem .75rem; }
 .card-scene {
   font-family: var(--serif); font-size: 1rem; font-weight: 400;

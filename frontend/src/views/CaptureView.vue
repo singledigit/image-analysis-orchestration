@@ -237,7 +237,11 @@ async function runPipeline() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageId: `demo-${Date.now()}`, executionId, s3Key, imageMediaType: imageMediaType.value, gridSize: n }),
     })
-    if (!analyzeRes.ok) throw new Error(`Analyze failed: ${await analyzeRes.text()}`)
+    if (!analyzeRes.ok) {
+      const errBody = await analyzeRes.json().catch(() => ({}))
+      if (errBody.blocked) throw new Error('⚠ This image was blocked — it may contain inappropriate content.')
+      throw new Error(`Analyze failed: ${JSON.stringify(errBody)}`)
+    }
 
     const { channel, realtimeEndpoint, realtimeWsEndpoint, apiKey } = await analyzeRes.json()
 

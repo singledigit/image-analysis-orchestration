@@ -124,9 +124,32 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
 
   context.logger.info('Pipeline started', { imageId: event.imageId, executionId });
 
-  // ── Step 1: preprocess — build grid metadata only (no image bytes) ──
+  // ── Step 1: preprocess — moderate + build grid ───────────────────
   const preprocessed = await context.step('preprocess', async () => {
     const gridSize = Number(event.gridSize ?? 3);
+    const imageBase64 = await fetchImageBase64(event);
+    const fmt = parseImageFormat(event.imageMediaType ?? 'image/jpeg');
+
+    // Moderation check via Nova before doing any work
+    const moderationPrompt =
+      'Does this image contain any of the following: nudity, sexual content, graphic violence, ' +
+      'gore, hate symbols, or other content inappropriate for a public conference booth? ' +
+      'Reply with ONLY a JSON object: {"safe": true} or {"safe": false, "reason": "brief reason"}.';
+
+    const modRaw = await invokeNova(moderationPrompt, imageBase64, fmt);
+    const modMatch = modRaw.match(/\{[\s\S]*\}/);
+    if (modMatch) {
+      try {
+        const mod = JSON.parse(modMatch[0]);
+        if (mod.safe === false) {
+          throw new Error(`Image blocked: ${mod.reason ?? 'inappropriate content'}`);
+        }
+      } catch (e: any) {
+        // Re-throw moderation failures; ignore JSON parse errors (assume safe)
+        if (e.message?.startsWith('Image blocked')) throw e;
+      }
+    }
+
     return { regions: buildRegions(gridSize), gridSize };
   });
 

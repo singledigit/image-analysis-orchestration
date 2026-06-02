@@ -1,8 +1,8 @@
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, ScanCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, ScanCommand, GetCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 
 const lambda = new LambdaClient({});
 const s3     = new S3Client({});
@@ -14,6 +14,7 @@ const RESULTS_TABLE         = process.env.RESULTS_TABLE!;
 const REALTIME_ENDPOINT     = process.env.REALTIME_ENDPOINT!;
 const REALTIME_WS_ENDPOINT  = process.env.REALTIME_WS_ENDPOINT!;
 const REALTIME_API_KEY      = process.env.REALTIME_API_KEY!;
+const ADMIN_KEY             = process.env.ADMIN_KEY!;
 
 export async function handler(event: AWSLambda.APIGatewayProxyEventV2) {
   const method = event.requestContext.http.method;
@@ -21,7 +22,7 @@ export async function handler(event: AWSLambda.APIGatewayProxyEventV2) {
 
   if (method === 'OPTIONS') return cors(204, '');
 
-  // ── GET /results — list all results newest first ──────────────
+  // ── GET /results ──────────────────────────────────────────────
   if (method === 'GET' && path === '/results') {
     const res = await ddb.send(new ScanCommand({ TableName: RESULTS_TABLE }));
     const items = (res.Items ?? []).sort((a, b) =>
@@ -30,12 +31,30 @@ export async function handler(event: AWSLambda.APIGatewayProxyEventV2) {
     return cors(200, JSON.stringify(items));
   }
 
-  // ── GET /results/:imageId — single result ─────────────────────
+  // ── GET /results/:imageId ─────────────────────────────────────
   if (method === 'GET' && path.startsWith('/results/')) {
     const imageId = decodeURIComponent(path.split('/results/')[1]);
     const res = await ddb.send(new GetCommand({ TableName: RESULTS_TABLE, Key: { imageId } }));
     if (!res.Item) return cors(404, JSON.stringify({ error: 'Not found' }));
     return cors(200, JSON.stringify(res.Item));
+  }
+
+  // ── DELETE /results/:imageId — admin only ─────────────────────
+  if (method === 'DELETE' && path.startsWith('/results/')) {
+    const adminKey = event.headers['x-admin-key'];
+    if (!adminKey || adminKey !== ADMIN_KEY) {
+      return cors(401, JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    const imageId = decodeURIComponent(path.split('/results/')[1]);
+    const existing = await ddb.send(new GetCommand({ TableName: RESULTS_TABLE, Key: { imageId } }));
+    if (!existing.Item) return cors(404, JSON.stringify({ error: 'Not found' }));
+
+    const s3Key = existing.Item.imageS3Key as string | undefined;
+    await ddb.send(new DeleteCommand({ TableName: RESULTS_TABLE, Key: { imageId } }));
+    if (s3Key) await s3.send(new DeleteObjectCommand({ Bucket: IMAGE_BUCKET, Key: s3Key })).catch(() => {});
+
+    return cors(200, JSON.stringify({ deleted: imageId }));
   }
 
   // ── POST /upload → presigned PUT URL ─────────────────────────
@@ -92,8 +111,8 @@ function cors(statusCode: number, body: string) {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Key',
     },
     body,
   };
