@@ -87,8 +87,14 @@
             @click="selected = r"
           >
             <div class="card-img">
-              <img v-if="r.thumbnailUrl" :src="r.thumbnailUrl" :alt="r.imageId" loading="lazy" />
-              <div v-else class="card-img-placeholder">◈</div>
+              <img
+                v-if="r.thumbnailUrl"
+                :src="r.thumbnailUrl"
+                :alt="r.imageId"
+                loading="lazy"
+                @error="(e) => (e.target as HTMLImageElement).style.display = 'none'"
+              />
+              <div class="card-img-placeholder">◈</div>
               <div class="card-badge">{{ r.successfulRegions }}/{{ r.regionCount }}</div>
             </div>
             <div class="card-body">
