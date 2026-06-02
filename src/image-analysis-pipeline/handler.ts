@@ -98,13 +98,17 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
     'analyze-regions',
     preprocessed.regions,
     async (ctx: DurableContext, region: ImageRegion, index: number) => {
-      const finding = await ctx.step(`analyze-region-${index}`, async () => {
-        // Each region step fetches the image independently — bytes never checkpoint
+      return await ctx.step(`analyze-region-${index}`, async () => {
         const imageBase64 = await fetchImageBase64(event);
-        return analyzeRegion(imageBase64, imageFormat, region);
+        const finding = await analyzeRegion(imageBase64, imageFormat, region);
+        await publish(ch, [{ type: 'region', index, status: 'done', finding }]);
+        // Only checkpoint what synthesize needs — analysis capped at 500 chars
+        return {
+          regionIndex: finding.regionIndex,
+          regionLabel: finding.regionLabel,
+          analysis: finding.analysis.slice(0, 500),
+        } as RegionFinding;
       });
-      await publish(ch, [{ type: 'region', index, status: 'done', finding }]);
-      return finding;
     },
     { maxConcurrency: 5 }
   );
