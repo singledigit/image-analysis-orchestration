@@ -282,6 +282,12 @@ onUnmounted(() => appSyncEvents.disconnect())
   min-height: 100vh; background: var(--bg);
 }
 
+/* Allow the page to scroll naturally on desktop */
+@media (min-width: 900px) {
+  .dashboard-layout { overflow: visible; }
+  html, body, #app { height: auto; overflow: visible; }
+}
+
 header {
   display: flex; align-items: center; justify-content: space-between;
   padding: .75rem 1.5rem;
@@ -470,23 +476,28 @@ header {
 .slide-up-enter-from { opacity: 0; transform: translateY(40px); }
 .slide-up-leave-to   { opacity: 0; transform: translateY(40px); }
 
-/* Desktop: sidebar left + grid right */
+/* Desktop: sidebar sticky left + grid scrolls right */
 @media (min-width: 900px) {
-  .body { flex-direction: row; overflow: hidden; }
+  .body { flex-direction: row; overflow: visible; }
 
   .cta-panel {
     width: 340px; flex-shrink: 0; box-sizing: border-box;
     border-bottom: none; border-right: 1px solid var(--border);
-    overflow-y: auto; overflow-x: hidden;
+    overflow-x: hidden;
     padding: 2rem 1.75rem;
-    justify-content: center;
+    justify-content: flex-start;
+    /* Stick to viewport — sidebar never scrolls */
+    position: sticky;
+    top: 0;
+    height: calc(100vh - 53px); /* full height minus header */
+    overflow-y: auto;
   }
   .cta-headline { font-size: 1.75rem; }
   .cta-url { font-size: 1rem; }
   .stat-value { font-size: 2.75rem; }
 
-  .grid-area { overflow-y: auto; }
-  /* Fixed 4-column grid — cards scroll vertically */
+  .grid-area { overflow-y: visible; }
+  /* Fixed 4-column grid — page scrolls naturally */
   .results-grid { grid-template-columns: repeat(4, 1fr); gap: 1rem; align-content: start; }
 
   .detail-overlay { align-items: center; padding: 2rem; }
