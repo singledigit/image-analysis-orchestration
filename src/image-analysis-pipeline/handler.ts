@@ -220,11 +220,12 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
       regionCount: preprocessed.regions.length,
       successfulRegions: successfulFindings.length,
       synthesis,
-      // Store only slim findings in DDB to keep item under 400KB
+      // Slim findings — cap analysis text but keep detectedObjects for Jarvis overlay
       findings: successfulFindings.map(f => ({
         regionIndex: f.regionIndex,
         regionLabel: f.regionLabel,
         analysis: f.analysis.slice(0, 400),
+        detectedObjects: (f.detectedObjects ?? []).slice(0, 10), // cap per-region to stay under 400KB
       })),
     };
 

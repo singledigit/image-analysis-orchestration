@@ -94,6 +94,12 @@
                 @error="(e) => (e.target as HTMLImageElement).style.display = 'none'"
               />
               <div class="card-img-placeholder">◈</div>
+              <JarvisOverlay
+                v-if="r.findings?.length"
+                :findings="r.findings"
+                :grid-size="Math.round(Math.sqrt(r.regionCount ?? 9))"
+                :running="false"
+              />
               <div class="card-badge">{{ r.successfulRegions }}/{{ r.regionCount }}</div>
               <button
                 v-if="isAdmin"
