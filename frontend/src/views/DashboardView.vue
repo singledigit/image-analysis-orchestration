@@ -18,25 +18,58 @@
 
       <!-- ── Left: QR + CTA ──────────────────────────────────── -->
       <aside class="cta-panel">
+
+        <!-- QR + call to action -->
         <div class="qr-wrap">
           <canvas ref="qrCanvas" class="qr-code" />
         </div>
         <p class="cta-headline">Scan to analyse<br>your own image</p>
         <p class="cta-url">{{ captureUrlShort }}</p>
+
+        <!-- Live stats -->
         <div class="cta-stats">
           <div class="stat">
             <div class="stat-value">{{ results.length }}</div>
-            <div class="stat-label">analysed</div>
+            <div class="stat-label">images analysed</div>
           </div>
           <div class="stat-divider" />
           <div class="stat">
             <div class="stat-value">{{ totalRegions }}</div>
-            <div class="stat-label">regions</div>
+            <div class="stat-label">regions processed</div>
+          </div>
+          <div class="stat-divider" />
+          <div class="stat">
+            <div class="stat-value">{{ avgRegions }}</div>
+            <div class="stat-label">avg regions/image</div>
           </div>
         </div>
+
+        <!-- Why regions explainer -->
+        <div class="explainer">
+          <div class="explainer-title">Why break images into regions?</div>
+          <ul class="explainer-list">
+            <li>
+              <span class="explainer-icon">⊞</span>
+              <span><strong>Localisation</strong> — know <em>where</em> objects are, not just <em>what</em> they are</span>
+            </li>
+            <li>
+              <span class="explainer-icon">⚡</span>
+              <span><strong>Parallelism</strong> — every region runs as an independent Lambda invocation simultaneously</span>
+            </li>
+            <li>
+              <span class="explainer-icon">↺</span>
+              <span><strong>Fault isolation</strong> — if one region fails, only that region retries — the rest keep their results</span>
+            </li>
+            <li>
+              <span class="explainer-icon">◈</span>
+              <span><strong>Checkpointed</strong> — each step is persisted; kill the pipeline mid-run and it resumes exactly where it stopped</span>
+            </li>
+          </ul>
+        </div>
+
         <div class="powered-by">
-          <span class="tag">Durable Functions</span>
-          <span class="tag">Bedrock Nova</span>
+          <span class="tag">AWS Lambda Durable Functions</span>
+          <span class="tag">Amazon Bedrock Nova</span>
         </div>
       </aside>
 
@@ -131,6 +164,11 @@ const connected  = ref(false)
 const totalRegions = computed(() =>
   results.value.reduce((s, r) => s + (r.successfulRegions ?? 0), 0)
 )
+
+const avgRegions = computed(() => {
+  if (!results.value.length) return 0
+  return Math.round(totalRegions.value / results.value.length)
+})
 
 const selectedFindings = computed(() => {
   if (!selected.value) return []
@@ -302,6 +340,29 @@ header {
 .tag {
   font-size: 9px; font-weight: 500; letter-spacing: .07em; text-transform: uppercase;
   padding: .2rem .5rem; border: 1px solid var(--border-mid); color: var(--text-muted); border-radius: 3px;
+}
+
+/* Explainer */
+.explainer {
+  width: 100%;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 4px; padding: .9rem 1rem;
+}
+.explainer-title {
+  font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: .75rem;
+}
+.explainer-list {
+  list-style: none; display: flex; flex-direction: column; gap: .65rem;
+}
+.explainer-list li {
+  display: flex; align-items: flex-start; gap: .6rem;
+  font-size: 11px; line-height: 1.5; color: var(--text-dim);
+}
+.explainer-list li strong { color: var(--text); }
+.explainer-list li em { color: var(--amber); font-style: normal; }
+.explainer-icon {
+  color: var(--amber); font-size: 12px; flex-shrink: 0; margin-top: 1px;
 }
 
 /* Grid */
