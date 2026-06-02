@@ -166,6 +166,66 @@ Resources:
         Sourcemap: true
         EntryPoints: [handler.ts]
 
+  # ── Frontend hosting: S3 + CloudFront (no caching) ───────────────
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "cvpr-frontend-${AWS::AccountId}"
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: FrontendS3
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !GetAtt FrontendOAC.Id
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3
+          ViewerProtocolPolicy: redirect-to-https
+          # No caching — every request goes to S3
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad   # CachingDisabled managed policy
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # CORS-S3Origin
+          AllowedMethods: [GET, HEAD, OPTIONS]
+        CustomErrorResponses:
+          # SPA fallback — all 403/404 serve index.html for client-side routing
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "cvpr-frontend-oac-${AWS::AccountId}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
   # ── Log groups ────────────────────────────────────────────────────
 
   PipelineLogGroup:
@@ -205,6 +265,14 @@ Outputs:
   AliasArn:
     Description: Qualified alias ARN — use this to invoke
     Value: !Ref ImageAnalysisPipeline.Alias
+
+  FrontendUrl:
+    Description: CloudFront URL for the frontend
+    Value: !Sub "https://${FrontendDistribution.DomainName}"
+
+  FrontendBucket:
+    Description: S3 bucket for frontend assets
+    Value: !Ref FrontendBucket
 
   StackName:
     Value: !Ref AWS::StackName
