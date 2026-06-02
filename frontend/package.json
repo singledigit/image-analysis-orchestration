@@ -13,7 +13,7 @@
     "lint": "run-s lint:*",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
-    "deploy": "npm run build && aws s3 sync dist s3://cvpr-frontend-088483494489 --delete --cache-control 'no-store, no-cache, must-revalidate' --region us-east-1 && aws cloudfront create-invalidation --distribution-id E27CYAL2FAAFIC --paths '/*' --region us-east-1"
+    "deploy": "npm run build && aws s3 sync dist s3://cvpr-frontend-088483494489 --delete --cache-control 'no-store, no-cache, must-revalidate' --region us-east-1"
   },
   "dependencies": {
     "pinia": "^3.0.4",
