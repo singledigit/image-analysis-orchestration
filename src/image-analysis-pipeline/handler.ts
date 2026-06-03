@@ -1,6 +1,5 @@
 import { withDurableExecution, DurableContext } from '@aws/durable-execution-sdk-js';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { AnalysisPipelineEvent, ImageRegion, RegionFinding, DetectedObject, AnalysisSynthesis, AnalysisResult } from './types';
@@ -10,6 +9,7 @@ import { publish } from './events';
 const s3  = new S3Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const RESULTS_TABLE = process.env.RESULTS_TABLE!;
+const CDN_DOMAIN    = process.env.CDN_DOMAIN!;
 
 const channel = (executionId: string) => `/pipeline/${executionId}`;
 
@@ -206,9 +206,9 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
   const storedAt = await context.step('store', async () => {
     const now = new Date().toISOString();
 
-    // Generate a 7-day presigned GET URL for the thumbnail
-    const thumbnailUrl = event.imageS3Key
-      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: event.imageBucket, Key: event.imageS3Key }), { expiresIn: 604800 })
+    // Permanent CloudFront URL — no expiry, no presigning needed
+    const thumbnailUrl = event.imageS3Key && CDN_DOMAIN
+      ? `https://${CDN_DOMAIN}/${event.imageS3Key}`
       : undefined;
 
     const record = {

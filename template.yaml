@@ -170,6 +170,7 @@ Resources:
         Variables:
           IMAGE_BUCKET: !Ref ImageBucket
           RESULTS_TABLE: !Ref ResultsTable
+          CDN_DOMAIN: !Sub "${FrontendDistribution.DomainName}"
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
       DurableConfig:
@@ -221,6 +222,22 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
 
+  # Allow CloudFront to read uploaded images directly from ImageBucket
+  ImageBucketCFPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ImageBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${ImageBucket.Arn}/uploads/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -232,6 +249,17 @@ Resources:
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
             S3OriginConfig: {}
             OriginAccessControlId: !GetAtt FrontendOAC.Id
+          - Id: ImageS3
+            DomainName: !GetAtt ImageBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !GetAtt FrontendOAC.Id
+        # /uploads/* served from ImageBucket with caching enabled (images don't change)
+        CacheBehaviors:
+          - PathPattern: /uploads/*
+            TargetOriginId: ImageS3
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+            AllowedMethods: [GET, HEAD]
         DefaultCacheBehavior:
           TargetOriginId: FrontendS3
           ViewerProtocolPolicy: redirect-to-https
