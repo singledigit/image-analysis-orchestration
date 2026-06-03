@@ -47,12 +47,19 @@ Resources:
   # ── DynamoDB — results store ──────────────────────────────────────
 
   ResultsTable:
-    Type: AWS::Serverless::SimpleTable
+    Type: AWS::DynamoDB::Table
     Properties:
       TableName: cvpr-results
-      PrimaryKey:
-        Name: imageId
-        Type: String
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: imageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: imageId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   # ── S3 bucket for image uploads ──────────────────────────────────
 

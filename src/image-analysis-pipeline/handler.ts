@@ -215,6 +215,7 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
       imageId: event.imageId,
       executionId,
       storedAt: now,
+      ttl: Math.floor(Date.now() / 1000) + 86400, // 24-hour TTL
       imageS3Key: event.imageS3Key,
       thumbnailUrl,
       regionCount: preprocessed.regions.length,
