@@ -178,15 +178,37 @@ function clearImage() {
   running.value = false
 }
 
+const MAX_PX = 1200 // max long edge in pixels
+
 function loadFile(file: File) {
-  imageFile.value = file
   imageMediaType.value = file.type || 'image/jpeg'
   const reader = new FileReader()
   reader.onload = (e) => {
-    const url = e.target!.result as string
-    imageDataUrl.value = url
-    imageBase64.value = url.split(',')[1] ?? null
-    resetPipeline()
+    const original = e.target!.result as string
+    const img = new Image()
+    img.onload = () => {
+      const { width, height } = img
+      const scale = Math.min(1, MAX_PX / Math.max(width, height))
+      const w = Math.round(width * scale)
+      const h = Math.round(height * scale)
+
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+
+      const resized = canvas.toDataURL(imageMediaType.value, 0.88)
+      imageDataUrl.value = resized
+      imageBase64.value = resized.split(',')[1] ?? null
+
+      // Build a resized File for the S3 PUT
+      canvas.toBlob(blob => {
+        if (blob) imageFile.value = new File([blob], file.name, { type: imageMediaType.value })
+      }, imageMediaType.value, 0.88)
+
+      resetPipeline()
+    }
+    img.src = original
   }
   reader.readAsDataURL(file)
 }
