@@ -79,6 +79,37 @@ Resources:
             AllowedHeaders: ["*"]
             MaxAge: 3000
 
+  # ── Cognito User Pool — admin-only, no self-signup ───────────────
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: cvpr-demo-users
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: false
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: cvpr-demo-client
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AccessTokenValidity: 8
+      TokenValidityUnits:
+        AccessToken: hours
+
   # ── HTTP API ──────────────────────────────────────────────────────
 
   Api:
@@ -87,7 +118,15 @@ Resources:
       CorsConfiguration:
         AllowOrigins: ["*"]
         AllowMethods: [GET, POST, DELETE, OPTIONS]
-        AllowHeaders: [Content-Type, X-Admin-Key]
+        AllowHeaders: [Content-Type, Authorization]
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+              audience:
+                - !Ref UserPoolClient
 
   # ── API handler ───────────────────────────────────────────────────
 
@@ -106,7 +145,7 @@ Resources:
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_WS_ENDPOINT: !Sub "wss://${RealtimeApi.Dns.Realtime}/event/realtime"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
-          ADMIN_KEY: "{{resolve:ssm:/cvpr/admin-key}}"
+          USER_POOL_ID: !Ref UserPool
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ImageBucket
@@ -150,6 +189,8 @@ Resources:
             ApiId: !Ref Api
             Path: /results/{imageId}
             Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
         Options:
           Type: HttpApi
           Properties:
@@ -331,6 +372,14 @@ Outputs:
   FrontendBucket:
     Description: S3 bucket for frontend assets
     Value: !Ref FrontendBucket
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
 
   StackName:
     Value: !Ref AWS::StackName

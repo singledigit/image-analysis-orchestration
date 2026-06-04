@@ -14,7 +14,8 @@ const RESULTS_TABLE         = process.env.RESULTS_TABLE!;
 const REALTIME_ENDPOINT     = process.env.REALTIME_ENDPOINT!;
 const REALTIME_WS_ENDPOINT  = process.env.REALTIME_WS_ENDPOINT!;
 const REALTIME_API_KEY      = process.env.REALTIME_API_KEY!;
-const ADMIN_KEY             = process.env.ADMIN_KEY!;
+// DELETE is protected by Cognito JWT authorizer at API Gateway level
+// Lambda trusts the gateway — no additional key check needed
 
 export async function handler(event: AWSLambda.APIGatewayProxyEventV2) {
   const method = event.requestContext.http.method;
@@ -39,13 +40,8 @@ export async function handler(event: AWSLambda.APIGatewayProxyEventV2) {
     return cors(200, JSON.stringify(res.Item));
   }
 
-  // ── DELETE /results/:imageId — admin only ─────────────────────
+  // ── DELETE /results/:imageId — JWT auth enforced by API Gateway ──
   if (method === 'DELETE' && path.startsWith('/results/')) {
-    const adminKey = event.headers['x-admin-key'];
-    if (!adminKey || adminKey !== ADMIN_KEY) {
-      return cors(401, JSON.stringify({ error: 'Unauthorized' }));
-    }
-
     const imageId = decodeURIComponent(path.split('/results/')[1]);
     const existing = await ddb.send(new GetCommand({ TableName: RESULTS_TABLE, Key: { imageId } }));
     if (!existing.Item) return cors(404, JSON.stringify({ error: 'Not found' }));

@@ -11,6 +11,7 @@
         <span class="live-dot" :class="{ active: connected }" />
         <span class="live-label">{{ connected ? 'LIVE' : 'CONNECTING' }}</span>
         <a class="scan-btn" href="/capture">+ Capture</a>
+        <button class="logout-btn" @click="handleLogout">Sign out</button>
       </div>
     </header>
 
@@ -171,16 +172,22 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import JarvisOverlay from '../components/JarvisOverlay.vue'
 import { appSyncEvents } from '../services/appSyncEvents'
+import { getToken, logout } from '../services/auth'
 
-const API_BASE         = (import.meta.env.VITE_API_BASE as string).replace(/\/$/, '')
-const captureUrl       = `${location.origin}/capture`
-const captureUrlShort  = captureUrl.replace(/^https?:\/\//, '')
-const ADMIN_KEY        = import.meta.env.VITE_ADMIN_KEY as string
+const API_BASE        = (import.meta.env.VITE_API_BASE as string).replace(/\/$/, '')
+const captureUrl      = `${location.origin}/capture`
+const captureUrlShort = captureUrl.replace(/^https?:\/\//, '')
+const router          = useRouter()
+const isAdmin         = true // always admin when logged in
 
-const isAdmin = new URLSearchParams(location.search).has('admin')
+function handleLogout() {
+  logout()
+  router.push('/login')
+}
 
 const qrCanvas   = ref<HTMLCanvasElement>()
 const results    = ref<any[]>([])
@@ -279,11 +286,11 @@ async function renderQR() {
 }
 
 async function deleteResult(imageId: string) {
-  if (!confirm(`Delete "${imageId}"?`)) return
+  if (!confirm(`Delete this image?`)) return
   try {
     const res = await fetch(`${API_BASE}/results/${encodeURIComponent(imageId)}`, {
       method: 'DELETE',
-      headers: { 'X-Admin-Key': ADMIN_KEY },
+      headers: { 'Authorization': `Bearer ${getToken()}` },
     })
     if (res.ok) {
       results.value = results.value.filter(r => r.imageId !== imageId)
@@ -352,6 +359,14 @@ header {
   transition: opacity .2s;
 }
 .scan-btn:hover { opacity: .85; }
+
+.logout-btn {
+  font-size: 10px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase;
+  padding: .3rem .7rem; background: transparent;
+  border: 1px solid var(--border-mid); border-radius: 3px;
+  color: var(--text-muted); cursor: pointer; transition: color .15s, border-color .15s;
+}
+.logout-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
 /* Body split */
 .body {
