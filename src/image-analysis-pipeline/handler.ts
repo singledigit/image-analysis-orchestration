@@ -167,11 +167,17 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
         const imageBase64 = await fetchImageBase64(event);
         const finding = await analyzeRegion(imageBase64, imageFormat, region);
         await publish(ch, [{ type: 'region', index, status: 'done', finding }]);
-        // Only checkpoint what synthesize needs — analysis capped at 500 chars
+        // Cap analysis text and limit objects to stay under 256KB checkpoint limit
         return {
           regionIndex: finding.regionIndex,
           regionLabel: finding.regionLabel,
           analysis: finding.analysis.slice(0, 500),
+          detectedObjects: (finding.detectedObjects ?? []).slice(0, 8).map(o => ({
+            label: o.label,
+            x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2,
+            confidence: o.confidence,
+            primary: o.primary,
+          })),
         } as RegionFinding;
       });
     },
