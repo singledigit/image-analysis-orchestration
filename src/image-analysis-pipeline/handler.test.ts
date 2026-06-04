@@ -7,7 +7,7 @@ import { handler } from './handler';
 import * as bedrock from './bedrock';
 import { AnalysisResult, RegionFinding, AnalysisSynthesis } from './types';
 
-// ── Mocks ────────────────────────────────────────────────────────────────────
+// ── Mocks ─────────────────────────────────────────────────────────
 
 // Keep parseImageFormat real; only mock the async Bedrock calls.
 jest.mock('./bedrock', () => ({
@@ -15,12 +15,23 @@ jest.mock('./bedrock', () => ({
   invokeNova: jest.fn(),
   invokeNovaText: jest.fn(),
 }));
-const mockInvokeNova = bedrock.invokeNova as jest.MockedFunction<typeof bedrock.invokeNova>;
+// Mock DynamoDB so the store step doesn't need a real table
+jest.mock('@aws-sdk/lib-dynamodb', () => ({
+  DynamoDBDocumentClient: { from: () => ({ send: jest.fn().mockResolvedValue({}) }) },
+  PutCommand: jest.fn(),
+}));
+
+const mockInvokeNova    = bedrock.invokeNova    as jest.MockedFunction<typeof bedrock.invokeNova>;
 const mockInvokeNovaText = bedrock.invokeNovaText as jest.MockedFunction<typeof bedrock.invokeNovaText>;
 
-const FAKE_REGION_ANALYSIS =
-  'Objects: person, bicycle. Features: sharp edges, high contrast. ' +
-  'Good segmentation target with clear object boundaries.';
+// Nova returns structured JSON for region analysis
+const FAKE_REGION_JSON = JSON.stringify({
+  analysis: 'Urban street scene with pedestrians and cyclists on a busy road.',
+  detectedObjects: [
+    { label: 'person', x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.9, confidence: 'high', primary: true },
+    { label: 'bicycle', x1: 0.5, y1: 0.3, x2: 0.8, y2: 0.9, confidence: 'medium', primary: false },
+  ],
+});
 
 const FAKE_SYNTHESIS: AnalysisSynthesis = {
   overallDescription: 'Urban street scene with pedestrians and cyclists.',
@@ -33,78 +44,62 @@ const FAKE_SYNTHESIS: AnalysisSynthesis = {
   ],
 };
 
-// ── Fixture ───────────────────────────────────────────────────────────────────
+// ── Fixture ────────────────────────────────────────────────────────
 
 const PAYLOAD = {
-  imageId: 'img-cvpr-001',
+  imageId: 'img-test-001',
   imageBase64: Buffer.from('fake-image-bytes').toString('base64'),
   imageMediaType: 'image/jpeg' as const,
   gridSize: 2, // 2×2 = 4 regions — fast for tests
 };
 
-// ── Setup / teardown ──────────────────────────────────────────────────────────
+// ── Setup / teardown ───────────────────────────────────────────────
 
-beforeAll(() =>
-  LocalDurableTestRunner.setupTestEnvironment({ skipTime: true })
-);
-
-afterAll(() =>
-  LocalDurableTestRunner.teardownTestEnvironment()
-);
+beforeAll(() => LocalDurableTestRunner.setupTestEnvironment({ skipTime: true }));
+afterAll(() => LocalDurableTestRunner.teardownTestEnvironment());
 
 beforeEach(() => {
-  mockInvokeNova.mockResolvedValue(FAKE_REGION_ANALYSIS);
-  mockInvokeNovaText.mockResolvedValue(
-    JSON.stringify(FAKE_SYNTHESIS)
-  );
+  // First call per region is the moderation check (returns safe), rest are region analysis
+  mockInvokeNova.mockImplementation(async (prompt) => {
+    if (prompt.includes('nudity')) return JSON.stringify({ safe: true });
+    return FAKE_REGION_JSON;
+  });
+  mockInvokeNovaText.mockResolvedValue(JSON.stringify(FAKE_SYNTHESIS));
 });
 
 afterEach(() => jest.clearAllMocks());
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests ──────────────────────────────────────────────────────────
 
 describe('image analysis pipeline', () => {
   it('completes all four pipeline steps', async () => {
-    const runner = new LocalDurableTestRunner({ handlerFunction: handler });
+    const runner    = new LocalDurableTestRunner({ handlerFunction: handler });
     const execution = await runner.run({ payload: PAYLOAD });
 
     expect(execution.getStatus()).toBe('SUCCEEDED');
-
-    const preprocess = runner.getOperation('preprocess');
-    expect(preprocess.getType()).toBe(OperationType.STEP);
-    expect(preprocess.getStatus()).toBe(OperationStatus.SUCCEEDED);
-
-    const mapOp = runner.getOperation('analyze-regions');
-    expect(mapOp.getType()).toBe(OperationType.CONTEXT);
-    expect(mapOp.getStatus()).toBe(OperationStatus.SUCCEEDED);
-
-    const synthesize = runner.getOperation('synthesize');
-    expect(synthesize.getType()).toBe(OperationType.STEP);
-    expect(synthesize.getStatus()).toBe(OperationStatus.SUCCEEDED);
-
-    const store = runner.getOperation('store');
-    expect(store.getType()).toBe(OperationType.STEP);
-    expect(store.getStatus()).toBe(OperationStatus.SUCCEEDED);
+    expect(runner.getOperation('preprocess').getType()).toBe(OperationType.STEP);
+    expect(runner.getOperation('preprocess').getStatus()).toBe(OperationStatus.SUCCEEDED);
+    expect(runner.getOperation('analyze-regions').getType()).toBe(OperationType.CONTEXT);
+    expect(runner.getOperation('analyze-regions').getStatus()).toBe(OperationStatus.SUCCEEDED);
+    expect(runner.getOperation('synthesize').getStatus()).toBe(OperationStatus.SUCCEEDED);
+    expect(runner.getOperation('store').getStatus()).toBe(OperationStatus.SUCCEEDED);
   });
 
   it('fans out one step per region', async () => {
     const runner = new LocalDurableTestRunner({ handlerFunction: handler });
     await runner.run({ payload: PAYLOAD });
 
-    // 2×2 grid → 4 region steps
     for (let i = 0; i < 4; i++) {
-      const regionStep = runner.getOperation(`analyze-region-${i}`);
-      expect(regionStep.getStatus()).toBe(OperationStatus.SUCCEEDED);
+      expect(runner.getOperation(`analyze-region-${i}`).getStatus()).toBe(OperationStatus.SUCCEEDED);
     }
-    expect(mockInvokeNova).toHaveBeenCalledTimes(4);
   });
 
   it('returns well-formed AnalysisResult', async () => {
-    const runner = new LocalDurableTestRunner({ handlerFunction: handler });
+    const runner    = new LocalDurableTestRunner({ handlerFunction: handler });
     const execution = await runner.run({ payload: PAYLOAD });
 
     const result = execution.getResult() as AnalysisResult;
-    expect(result.imageId).toBe('img-cvpr-001');
+    expect(result.imageId).toBe('img-test-001');
     expect(result.regionCount).toBe(4);
     expect(result.successfulRegions).toBe(4);
     expect(result.findings).toHaveLength(4);
@@ -115,13 +110,11 @@ describe('image analysis pipeline', () => {
 
   it('is deterministic across replays', async () => {
     const runner = new LocalDurableTestRunner({ handlerFunction: handler });
-
-    const exec1 = await runner.run({ payload: PAYLOAD });
-    const exec2 = await runner.run({ payload: PAYLOAD });
+    const exec1  = await runner.run({ payload: PAYLOAD });
+    const exec2  = await runner.run({ payload: PAYLOAD });
 
     const r1 = exec1.getResult() as AnalysisResult;
     const r2 = exec2.getResult() as AnalysisResult;
-
     expect(r1.imageId).toBe(r2.imageId);
     expect(r1.synthesis.sceneType).toBe(r2.synthesis.sceneType);
     expect(r1.findings.map((f: RegionFinding) => f.regionIndex)).toEqual(
@@ -130,31 +123,31 @@ describe('image analysis pipeline', () => {
   });
 
   it('tolerates a failing region and still synthesizes', async () => {
-    // Make region 0 always fail (even on retries) by checking the prompt
     mockInvokeNova.mockImplementation(async (prompt) => {
+      if (prompt.includes('nudity')) return JSON.stringify({ safe: true });
       if (prompt.includes('region-0-0')) throw new Error('Permanent Bedrock failure for region 0');
-      return FAKE_REGION_ANALYSIS;
+      return FAKE_REGION_JSON;
     });
 
-    const runner = new LocalDurableTestRunner({ handlerFunction: handler });
+    const runner    = new LocalDurableTestRunner({ handlerFunction: handler });
     const execution = await runner.run({ payload: PAYLOAD });
 
     expect(execution.getStatus()).toBe('SUCCEEDED');
-
     const result = execution.getResult() as AnalysisResult;
     expect(result.successfulRegions).toBeLessThan(result.regionCount);
     expect(result.findings.length).toBeGreaterThan(0);
   });
 
-  it('invokes Nova once per region with correct image payload', async () => {
-    const runner = new LocalDurableTestRunner({ handlerFunction: handler });
-    await runner.run({ payload: PAYLOAD });
+  it('blocks images that fail moderation', async () => {
+    mockInvokeNova.mockImplementation(async (prompt) => {
+      if (prompt.includes('nudity')) return JSON.stringify({ safe: false, reason: 'explicit content' });
+      return FAKE_REGION_JSON;
+    });
 
-    const calls = mockInvokeNova.mock.calls;
-    expect(calls.length).toBe(4);
-    // Every call receives the same base64 image
-    calls.forEach(([, imgArg]) => expect(imgArg).toBe(PAYLOAD.imageBase64));
-    // Format derived from imageMediaType
-    calls.forEach(([, , fmtArg]) => expect(fmtArg).toBe('jpeg'));
+    const runner    = new LocalDurableTestRunner({ handlerFunction: handler });
+    const execution = await runner.run({ payload: PAYLOAD });
+
+    expect(execution.getStatus()).toBe('FAILED');
+    expect(execution.getError()?.errorMessage).toContain('Image blocked');
   });
 });

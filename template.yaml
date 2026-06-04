@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: CVPR 2026 — Durable image analysis pipeline demo
+Description: Image Analysis Orchestration — AWS Lambda Durable Functions demo
 
 Globals:
   Function:
@@ -145,7 +145,6 @@ Resources:
           REALTIME_ENDPOINT: !Sub "https://${RealtimeApi.Dns.Http}/event"
           REALTIME_WS_ENDPOINT: !Sub "wss://${RealtimeApi.Dns.Realtime}/event/realtime"
           REALTIME_API_KEY: !GetAtt RealtimeApiKey.ApiKey
-          USER_POOL_ID: !Ref UserPool
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ImageBucket

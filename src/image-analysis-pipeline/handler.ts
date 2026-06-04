@@ -2,18 +2,26 @@ import { withDurableExecution, DurableContext } from '@aws/durable-execution-sdk
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { AnalysisPipelineEvent, ImageRegion, RegionFinding, DetectedObject, AnalysisSynthesis, AnalysisResult } from './types';
-import { invokeNova, invokeNovaText, parseImageFormat } from './bedrock';
+import {
+  AnalysisPipelineEvent,
+  ImageRegion,
+  RegionFinding,
+  DetectedObject,
+  AnalysisSynthesis,
+  AnalysisResult,
+} from './types';
+import { invokeNova, invokeNovaText, parseImageFormat, ImageFormat } from './bedrock';
 import { publish } from './events';
 
 const s3  = new S3Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+
 const RESULTS_TABLE = process.env.RESULTS_TABLE!;
 const CDN_DOMAIN    = process.env.CDN_DOMAIN!;
 
 const channel = (executionId: string) => `/pipeline/${executionId}`;
 
-// ─── Helpers ──────────────────────────────────────────────────────
+// ─── Pure helpers (no side effects) ──────────────────────────────
 
 function buildRegions(gridSize: number): ImageRegion[] {
   const regions: ImageRegion[] = [];
@@ -22,7 +30,10 @@ function buildRegions(gridSize: number): ImageRegion[] {
     for (let col = 0; col < gridSize; col++) {
       const pct = Math.round(100 / gridSize);
       regions.push({
-        index, row, col, gridSize,
+        index,
+        row,
+        col,
+        gridSize,
         label: `region-${row}-${col} (rows ${row * pct}–${row * pct + pct}%, cols ${col * pct}–${col * pct + pct}%)`,
       });
       index++;
@@ -40,25 +51,45 @@ async function fetchImageBase64(event: AnalysisPipelineEvent): Promise<string> {
   return event.imageBase64!;
 }
 
+async function moderateImage(imageBase64: string, imageFormat: ImageFormat): Promise<void> {
+  const prompt =
+    'Does this image contain nudity, sexual content, graphic violence, gore, hate symbols, ' +
+    'or other content inappropriate for a public conference booth? ' +
+    'Reply with ONLY valid JSON: {"safe": true} or {"safe": false, "reason": "brief reason"}.';
+
+  const raw = await invokeNova(prompt, imageBase64, imageFormat);
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return; // unparseable → assume safe
+
+  let result: { safe: boolean; reason?: string };
+  try {
+    result = JSON.parse(match[0]);
+  } catch {
+    return; // JSON parse failure → assume safe
+  }
+
+  if (result.safe === false) {
+    throw new Error(`Image blocked: ${result.reason ?? 'inappropriate content'}`);
+  }
+}
+
 async function analyzeRegion(
   imageBase64: string,
-  imageFormat: 'jpeg' | 'png' | 'gif' | 'webp',
-  region: ImageRegion
+  imageFormat: ImageFormat,
+  region: ImageRegion,
 ): Promise<RegionFinding> {
-  const pct = Math.round(100 / region.gridSize);
-  const x1base = region.col * pct / 100;
-  const y1base = region.row * pct / 100;
+  const pct    = Math.round(100 / region.gridSize);
+  const x1Base = region.col * pct / 100;
+  const y1Base = region.row * pct / 100;
   const cellW  = pct / 100;
-  const cellH  = pct / 100;
 
   const prompt =
-    `You are analyzing ${region.label} of a ${region.gridSize}×${region.gridSize} image grid.\n\n` +
-    `This region covers x:[${x1base.toFixed(2)},${(x1base + cellW).toFixed(2)}] y:[${y1base.toFixed(2)},${(y1base + cellH).toFixed(2)}] ` +
-    `as normalized [0-1] coordinates of the FULL image.\n\n` +
-    `Return ONLY a JSON object with this exact structure (no markdown, no extra text):\n` +
+    `Analyze ${region.label} of a ${region.gridSize}×${region.gridSize} image grid.\n` +
+    `This region covers x:[${x1Base.toFixed(2)},${(x1Base + cellW).toFixed(2)}] ` +
+    `y:[${y1Base.toFixed(2)},${(y1Base + cellW).toFixed(2)}] (normalized [0-1] of full image).\n\n` +
+    `Return ONLY valid JSON (no markdown):\n` +
     `{\n` +
-    `  "analysis": "2-3 sentence description of what is visible",\n` +
-    `  "features": ["feature1", "feature2"],\n` +
+    `  "analysis": "2-3 sentence description",\n` +
     `  "detectedObjects": [\n` +
     `    {\n` +
     `      "label": "object name",\n` +
@@ -68,46 +99,39 @@ async function analyzeRegion(
     `    }\n` +
     `  ]\n` +
     `}\n\n` +
-    `x1,y1,x2,y2 are normalized [0-1] relative to the FULL image.\n` +
-    `"primary": true = dominant subject the scene is about; false = background/contextual/supporting object.\n` +
-    `Only include objects you can clearly see. Return empty array if nothing distinct is visible.`;
+    `Coords are normalized [0-1] relative to the FULL image. ` +
+    `primary=true for dominant subjects, false for background/contextual. ` +
+    `Return empty array if nothing distinct is visible.`;
 
   const raw = await invokeNova(prompt, imageBase64, imageFormat);
 
-  // Extract JSON — Nova sometimes wraps it in markdown fences
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  let parsed: { analysis: string; features: string[]; detectedObjects: DetectedObject[] } = {
-    analysis: raw.slice(0, 400),
-    features: [],
+  let parsed: { analysis: string; detectedObjects: DetectedObject[] } = {
+    analysis: raw.slice(0, 500),
     detectedObjects: [],
   };
 
   if (jsonMatch) {
-    try {
-      parsed = JSON.parse(jsonMatch[0]);
-    } catch {
-      // Partial parse failure — keep what we got
-    }
+    try { parsed = JSON.parse(jsonMatch[0]); }
+    catch { /* keep defaults */ }
   }
 
   return {
     regionIndex: region.index,
     regionLabel: region.label,
-    objects: (parsed.detectedObjects ?? []).map(o => o.label),
-    features: parsed.features ?? [],
-    analysis: parsed.analysis ?? raw.slice(0, 400),
+    analysis: parsed.analysis ?? raw.slice(0, 500),
     detectedObjects: parsed.detectedObjects ?? [],
   };
 }
 
 async function synthesizeFindings(findings: RegionFinding[]): Promise<AnalysisSynthesis> {
-  const n = Math.round(Math.sqrt(findings.length));
+  const n       = Math.round(Math.sqrt(findings.length));
   const summary = findings.map(f => `${f.regionLabel}: ${f.analysis}`).join('\n\n');
-  const prompt =
+  const prompt  =
     `You analyzed a ${n}×${n} grid of image regions:\n\n${summary}\n\n` +
-    `Now synthesize the full image. Return JSON with exactly these keys:\n` +
+    `Synthesize the full image. Return ONLY valid JSON:\n` +
     `{ "overallDescription": string, "dominantObjects": string[], "sceneType": string, "cvInsights": string[] }\n` +
-    `cvInsights should be 3-5 observations relevant to computer vision.`;
+    `cvInsights: 3-5 observations relevant to computer vision (segmentation difficulty, lighting, etc.).`;
 
   const raw = await invokeNovaText(prompt);
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -119,44 +143,26 @@ async function synthesizeFindings(findings: RegionFinding[]): Promise<AnalysisSy
 
 export const handler = withDurableExecution(async (event: AnalysisPipelineEvent, context: DurableContext) => {
   const executionId = event.executionId ?? event.imageId;
-  const ch = channel(executionId);
+  const ch          = channel(executionId);
+  // imageFormat is deterministic from event — safe to compute outside steps
   const imageFormat = parseImageFormat(event.imageMediaType ?? 'image/jpeg');
 
   context.logger.info('Pipeline started', { imageId: event.imageId, executionId });
 
-  // ── Step 1: preprocess — moderate + build grid ───────────────────
+  // ── Step 1: preprocess — moderate image + build region grid ──────
   const preprocessed = await context.step('preprocess', async () => {
-    const gridSize = Number(event.gridSize ?? 3);
+    const gridSize    = Number(event.gridSize ?? 3);
     const imageBase64 = await fetchImageBase64(event);
-    const fmt = parseImageFormat(event.imageMediaType ?? 'image/jpeg');
-
-    // Moderation check via Nova before doing any work
-    const moderationPrompt =
-      'Does this image contain any of the following: nudity, sexual content, graphic violence, ' +
-      'gore, hate symbols, or other content inappropriate for a public conference booth? ' +
-      'Reply with ONLY a JSON object: {"safe": true} or {"safe": false, "reason": "brief reason"}.';
-
-    const modRaw = await invokeNova(moderationPrompt, imageBase64, fmt);
-    const modMatch = modRaw.match(/\{[\s\S]*\}/);
-    if (modMatch) {
-      try {
-        const mod = JSON.parse(modMatch[0]);
-        if (mod.safe === false) {
-          throw new Error(`Image blocked: ${mod.reason ?? 'inappropriate content'}`);
-        }
-      } catch (e: any) {
-        // Re-throw moderation failures; ignore JSON parse errors (assume safe)
-        if (e.message?.startsWith('Image blocked')) throw e;
-      }
-    }
-
-    return { regions: buildRegions(gridSize), gridSize };
+    await moderateImage(imageBase64, imageFormat);
+    return { regions: buildRegions(gridSize) };
   });
 
+  // publish() outside a step is intentional: these are fire-and-forget
+  // observability events. They re-fire on replay but are idempotent.
   await publish(ch, [{ type: 'step', step: 'preprocess', status: 'done', regionCount: preprocessed.regions.length }]);
   context.logger.info('Regions extracted', { count: preprocessed.regions.length });
 
-  // ── Step 2: parallel map — each region fetches image from S3 itself ──
+  // ── Step 2: context.map — parallel region inference via Bedrock ──
   await publish(ch, [{ type: 'step', step: 'analyze', status: 'running', total: preprocessed.regions.length }]);
 
   const mapResults = await context.map(
@@ -164,24 +170,27 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
     preprocessed.regions,
     async (ctx: DurableContext, region: ImageRegion, index: number) => {
       return await ctx.step(`analyze-region-${index}`, async () => {
+        // Each step fetches the image independently — bytes never cross a checkpoint
         const imageBase64 = await fetchImageBase64(event);
-        const finding = await analyzeRegion(imageBase64, imageFormat, region);
+        const finding     = await analyzeRegion(imageBase64, imageFormat, region);
+
         await publish(ch, [{ type: 'region', index, status: 'done', finding }]);
-        // Cap analysis text and limit objects to stay under 256KB checkpoint limit
+
+        // Return only what synthesize needs — cap size to stay under 256 KB checkpoint limit
         return {
-          regionIndex: finding.regionIndex,
-          regionLabel: finding.regionLabel,
-          analysis: finding.analysis.slice(0, 500),
-          detectedObjects: (finding.detectedObjects ?? []).slice(0, 8).map(o => ({
-            label: o.label,
+          regionIndex:      finding.regionIndex,
+          regionLabel:      finding.regionLabel,
+          analysis:         finding.analysis.slice(0, 500),
+          detectedObjects:  (finding.detectedObjects ?? []).slice(0, 8).map(o => ({
+            label:      o.label,
             x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2,
             confidence: o.confidence,
-            primary: o.primary,
+            primary:    o.primary,
           })),
-        } as RegionFinding;
+        } satisfies RegionFinding;
       });
     },
-    { maxConcurrency: 5 }
+    { maxConcurrency: 5 },
   );
 
   const successfulFindings = mapResults.succeeded().map(item => item.result as RegionFinding);
@@ -191,78 +200,80 @@ export const handler = withDurableExecution(async (event: AnalysisPipelineEvent,
       context.logger.error('Region failed', { index: item.index, error: String(item.error) })
     );
   }
-  await publish(ch, [{ type: 'step', step: 'analyze', status: 'done',
-    successful: mapResults.successCount, failed: mapResults.failureCount }]);
+
+  await publish(ch, [{
+    type: 'step', step: 'analyze', status: 'done',
+    successful: mapResults.successCount, failed: mapResults.failureCount,
+  }]);
   context.logger.info('Region analysis complete', {
     total: mapResults.totalCount, successful: mapResults.successCount, failed: mapResults.failureCount,
   });
 
-  // ── Step 3: synthesize ─────────────────────────────────────────────
+  // ── Step 3: synthesize — aggregate all region findings ───────────
   await publish(ch, [{ type: 'step', step: 'synthesize', status: 'running' }]);
 
-  const synthesis = await context.step('synthesize', async () =>
+  const synthesis = await context.step('synthesize', () =>
     synthesizeFindings(successfulFindings)
   );
 
   await publish(ch, [{ type: 'step', step: 'synthesize', status: 'done', synthesis }]);
 
-  // ── Step 4: store ──────────────────────────────────────────────────
+  // ── Step 4: store — persist to DynamoDB, emit dashboard event ────
   await publish(ch, [{ type: 'step', step: 'store', status: 'running' }]);
 
-  const storedAt = await context.step('store', async () => {
-    const now = new Date().toISOString();
-
-    // Permanent CloudFront URL — no expiry, no presigning needed
+  const stored = await context.step('store', async () => {
+    const now          = new Date().toISOString();
     const thumbnailUrl = event.imageS3Key && CDN_DOMAIN
       ? `https://${CDN_DOMAIN}/${event.imageS3Key}`
       : undefined;
 
-    const record = {
-      imageId: event.imageId,
-      executionId,
-      storedAt: now,
-      ttl: Math.floor(Date.now() / 1000) + 86400, // 24-hour TTL
-      imageS3Key: event.imageS3Key,
-      thumbnailUrl,
-      regionCount: preprocessed.regions.length,
-      successfulRegions: successfulFindings.length,
-      synthesis,
-      // Slim findings — cap analysis text but keep detectedObjects for Jarvis overlay
-      findings: successfulFindings.map(f => ({
-        regionIndex: f.regionIndex,
-        regionLabel: f.regionLabel,
-        analysis: f.analysis.slice(0, 400),
-        detectedObjects: (f.detectedObjects ?? []).slice(0, 10), // cap per-region to stay under 400KB
-      })),
-    };
+    await ddb.send(new PutCommand({
+      TableName: RESULTS_TABLE,
+      Item: {
+        imageId:          event.imageId,
+        executionId,
+        storedAt:         now,
+        ttl:              Math.floor(Date.now() / 1000) + 86400, // 24h auto-expiry
+        imageS3Key:       event.imageS3Key,
+        thumbnailUrl,
+        regionCount:      preprocessed.regions.length,
+        successfulRegions: successfulFindings.length,
+        synthesis,
+        findings: successfulFindings.map(f => ({
+          regionIndex:     f.regionIndex,
+          regionLabel:     f.regionLabel,
+          analysis:        f.analysis.slice(0, 400),
+          detectedObjects: (f.detectedObjects ?? []).slice(0, 10),
+        })),
+      },
+    }));
 
-    await ddb.send(new PutCommand({ TableName: RESULTS_TABLE, Item: record }));
     context.logger.info('Stored result', { imageId: event.imageId });
-
     return { storedAt: now, thumbnailUrl };
   });
 
   const finalResult: AnalysisResult = {
-    imageId: event.imageId,
-    regionCount: preprocessed.regions.length,
+    imageId:           event.imageId,
+    regionCount:       preprocessed.regions.length,
     successfulRegions: successfulFindings.length,
-    findings: successfulFindings,
+    findings:          successfulFindings,
     synthesis,
-    storedAt: storedAt.storedAt,
-    thumbnailUrl: storedAt.thumbnailUrl,
+    storedAt:          stored.storedAt,
+    thumbnailUrl:      stored.thumbnailUrl,
   };
 
   await publish(ch, [{ type: 'complete', result: finalResult }]);
-
-  // Notify the dashboard channel so the board updates live
-  await publish('/pipeline/dashboard', [{ type: 'new-result', result: {
-    imageId: finalResult.imageId,
-    storedAt: finalResult.storedAt,
-    thumbnailUrl: finalResult.thumbnailUrl,
-    sceneType: finalResult.synthesis.sceneType,
-    regionCount: finalResult.regionCount,
-    successfulRegions: finalResult.successfulRegions,
-  }}]);
+  await publish('/pipeline/dashboard', [{
+    type:             'new-result',
+    result: {
+      imageId:          finalResult.imageId,
+      storedAt:         finalResult.storedAt,
+      thumbnailUrl:     finalResult.thumbnailUrl,
+      sceneType:        finalResult.synthesis.sceneType,
+      regionCount:      finalResult.regionCount,
+      successfulRegions: finalResult.successfulRegions,
+    },
+  }]);
 
   context.logger.info('Pipeline complete', { imageId: event.imageId, sceneType: synthesis.sceneType });
   return finalResult;

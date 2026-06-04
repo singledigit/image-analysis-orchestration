@@ -1,7 +1,6 @@
 export interface AnalysisPipelineEvent {
   imageId: string;
   executionId?: string;
-  // Image supplied either as S3 reference (preferred) or inline base64
   imageS3Key?: string;
   imageBucket?: string;
   imageBase64?: string;
@@ -14,26 +13,22 @@ export interface ImageRegion {
   row: number;
   col: number;
   gridSize: number;
-  label: string; // e.g. "top-left (rows 0-33%, cols 0-33%)"
+  label: string;
 }
 
 export interface DetectedObject {
   label: string;
-  // Normalized coords [0-1] relative to the full image (not the region)
   x1: number;
   y1: number;
   x2: number;
   y2: number;
   confidence: 'high' | 'medium' | 'low';
-  // primary = dominant subject; secondary = contextual/background
   primary: boolean;
 }
 
 export interface RegionFinding {
   regionIndex: number;
   regionLabel: string;
-  objects: string[];
-  features: string[];
   analysis: string;
   detectedObjects?: DetectedObject[];
 }
