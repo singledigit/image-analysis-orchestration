@@ -126,7 +126,7 @@
           <button class="detail-close" @click="selected = null">✕</button>
 
           <div class="detail-top">
-            <div class="detail-img" style="position:relative">
+            <div class="detail-img">
               <img v-if="selected.thumbnailUrl" :src="selected.thumbnailUrl" :alt="selected.imageId" />
               <div v-else class="card-img-placeholder large">◈</div>
               <JarvisOverlay
@@ -542,7 +542,7 @@ header {
   z-index: 200; padding: 0;
 }
 .detail-panel {
-  width: 100%; max-width: 680px; max-height: 85vh;
+  width: 100%; max-width: 760px; max-height: 90vh;
   background: var(--bg-panel); border: 1px solid var(--border-mid);
   border-radius: 8px 8px 0 0; padding: 1.25rem;
   overflow-y: auto; position: relative;
@@ -556,9 +556,12 @@ header {
   transition: color .15s;
 }
 .detail-close:hover { color: var(--text); }
-.detail-top { display: flex; gap: 1rem; }
-.detail-img { width: 140px; flex-shrink: 0; border-radius: 4px; overflow: hidden; aspect-ratio: 1; background: var(--bg-raised); }
-.detail-img img { width: 100%; height: 100%; object-fit: cover; }
+.detail-top { display: flex; flex-direction: column; gap: 1rem; }
+.detail-img {
+  width: 100%; border-radius: 4px; overflow: hidden;
+  background: var(--bg-raised); position: relative;
+}
+.detail-img img { width: 100%; height: auto; display: block; }
 .detail-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .5rem; }
 .detail-stats { display: flex; gap: 1rem; font-size: 10px; color: var(--text-muted); margin-top: auto; }
 .detail-section { display: flex; flex-direction: column; gap: .5rem; }
