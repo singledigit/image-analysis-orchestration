@@ -8,43 +8,41 @@ A live dashboard shows all submitted images with Jarvis-style bounding box overl
 
 ## Architecture
 
-```mermaid
-graph TD
-    Browser["Browser"]
-    CF["CloudFront / S3"]
-    APIGW["API Gateway"]
-    ApiLambda["API Lambda"]
-    S3I["S3 — image uploads"]
-    Step1["preprocess"]
-    Step2["context.map — N x Bedrock Nova"]
-    Step3["synthesize"]
-    Step4["store"]
-    DDB["DynamoDB"]
-    AppSync["AppSync Events API"]
-
-    Browser -->|serves app| CF
-    Browser -->|POST /upload| APIGW
-    Browser -->|PUT image| S3I
-    Browser -->|POST /analyze| APIGW
-    Browser -->|GET /results| APIGW
-    APIGW --> ApiLambda
-    ApiLambda -->|presigned URL| S3I
-    ApiLambda -->|async invoke| Step1
-    ApiLambda -->|read| DDB
-
-    Step1 -->|build grid| Step2
-    Step2 -->|aggregate| Step3
-    Step3 -->|persist| Step4
-    Step4 -->|write| DDB
-
-    Step1 -->|read image| S3I
-    Step2 -->|read image| S3I
-    Step4 -->|publish complete| AppSync
-    Step1 -->|publish progress| AppSync
-    Step2 -->|publish progress| AppSync
-    Step3 -->|publish progress| AppSync
-
-    AppSync -->|WebSocket| Browser
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                            Browser                                  │
+│            Dashboard (auth)          Capture (public)               │
+└───┬──────────────┬───────────────────────┬───────────────┬──────────┘
+    │ HTTPS        │ POST /upload           │ PUT image     │ WebSocket
+    ▼              ▼                        ▼               │
+CloudFront    API Gateway             S3 (uploads)         │
+(frontend)        │                                        │
+                  ▼                                        │
+            API Lambda                                     │
+            ├── POST /analyze ──► async invoke ──────────► │
+            ├── GET  /results ──► DynamoDB                 │
+            └── DELETE /results (JWT) ──► DynamoDB + S3   │
+                                                           │
+    ┌──────────────────────────────────────────────────┐   │
+    │           Lambda Durable Function                │   │
+    │                                                  │   │
+    │  1. preprocess   moderate image + build N×N grid │───┼─► AppSync
+    │       │                                          │   │   Events
+    │  2. context.map  N concurrent Bedrock Nova calls │───┼─► (step +
+    │       │          (one per region, checkpointed)  │   │    region
+    │  3. synthesize   aggregate findings + insights   │───┼─► events)
+    │       │                                          │   │
+    │  4. store        DynamoDB + CloudFront URL       │───┼─► AppSync
+    │                                                  │   │   (dashboard)
+    └──────────────────────────────────────────────────┘   │
+                   │ reads image from S3                   │
+                   ▼                                        │
+            S3 (uploads)                                   │
+                                                           │
+    AppSync Events API ◄───────────────────────────────────┘
+           │ WebSocket push
+           ▼
+        Browser (live UI updates)
 ```
 
 ### Request flow
