@@ -552,10 +552,18 @@ header {
 .detail-close:hover { color: var(--text); }
 .detail-top { display: flex; flex-direction: column; gap: 1rem; }
 .detail-img {
-  width: 100%; border-radius: 4px; overflow: hidden;
+  border-radius: 4px; overflow: hidden;
   background: var(--bg-raised); position: relative;
+  /* Shrink-wrap around the image so overlay coords match */
+  display: inline-block; max-width: 100%;
+  align-self: center;
 }
-.detail-img img { width: 100%; height: auto; display: block; }
+.detail-img img {
+  display: block;
+  max-width: 100%;
+  max-height: 40vh;
+  width: auto; height: auto;
+}
 .detail-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .5rem; }
 .detail-stats { display: flex; gap: 1rem; font-size: 10px; color: var(--text-muted); margin-top: auto; }
 .detail-section { display: flex; flex-direction: column; gap: .5rem; }
