@@ -120,6 +120,35 @@ watch(() => props.running, (r) => {
   }
 })
 
+function iou(a: DetectedObject, b: DetectedObject): number {
+  const ix1 = Math.max(a.x1, b.x1), iy1 = Math.max(a.y1, b.y1)
+  const ix2 = Math.min(a.x2, b.x2), iy2 = Math.min(a.y2, b.y2)
+  const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1)
+  if (inter === 0) return 0
+  const aArea = (a.x2 - a.x1) * (a.y2 - a.y1)
+  const bArea = (b.x2 - b.x1) * (b.y2 - b.y1)
+  return inter / (aArea + bArea - inter)
+}
+
+function mergeOrAdd(incoming: DetectedObject) {
+  const sameLabel = visibleObjects.value.filter(
+    o => o.label.toLowerCase() === incoming.label.toLowerCase()
+  )
+  const overlap = sameLabel.find(o => iou(o, incoming) > 0.3)
+  if (overlap) {
+    // Expand the existing box to cover both
+    overlap.x1 = Math.min(overlap.x1, incoming.x1)
+    overlap.y1 = Math.min(overlap.y1, incoming.y1)
+    overlap.x2 = Math.max(overlap.x2, incoming.x2)
+    overlap.y2 = Math.max(overlap.y2, incoming.y2)
+    // Keep higher confidence
+    if (incoming.confidence === 'high') overlap.confidence = 'high'
+    else if (incoming.confidence === 'medium' && overlap.confidence === 'low') overlap.confidence = 'medium'
+    return
+  }
+  visibleObjects.value.push(incoming)
+}
+
 function revealFinding(finding: RegionFinding) {
   if (!finding.detectedObjects?.length) return
   const pct = 1 / props.gridSize
@@ -132,7 +161,7 @@ function revealFinding(finding: RegionFinding) {
 
   finding.detectedObjects.forEach((obj, i) => {
     setTimeout(() => {
-      visibleObjects.value.push({ ...obj, primary: obj.primary ?? true })
+      mergeOrAdd({ ...obj, primary: obj.primary ?? true })
       if (i === finding.detectedObjects!.length - 1) {
         setTimeout(() => {
           activeRegions.value = activeRegions.value.filter(r => r !== region)
