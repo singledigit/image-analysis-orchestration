@@ -147,6 +147,23 @@
             </div>
           </div>
 
+          <!-- Detected objects — primary + secondary -->
+          <div v-if="detectedPrimary.length || detectedSecondary.length" class="detail-section">
+            <div class="result-meta-label">Detected Objects</div>
+            <div class="objects-group" v-if="detectedPrimary.length">
+              <span class="objects-group-label">Primary</span>
+              <div class="object-tags">
+                <span v-for="obj in detectedPrimary" :key="obj" class="object-tag primary">{{ obj }}</span>
+              </div>
+            </div>
+            <div class="objects-group" v-if="detectedSecondary.length" style="margin-top:.6rem">
+              <span class="objects-group-label">Secondary</span>
+              <div class="object-tags">
+                <span v-for="obj in detectedSecondary" :key="obj" class="object-tag secondary">{{ obj }}</span>
+              </div>
+            </div>
+          </div>
+
           <div v-if="selected.synthesis?.cvInsights?.length" class="detail-section">
             <div class="result-meta-label">CV Insights</div>
             <ul class="insights-list">
@@ -204,10 +221,25 @@ const avgRegions = computed(() => {
   return Math.round(totalRegions.value / results.value.length)
 })
 
-const selectedFindings = computed(() => {
-  if (!selected.value) return []
-  // Full findings may be on the item or need a separate fetch
-  return selected.value.findings ?? []
+const selectedFindings = computed(() => selected.value?.findings ?? [])
+
+const detectedPrimary = computed(() => {
+  const seen = new Set<string>()
+  return selectedFindings.value
+    .flatMap((f: any) => f.detectedObjects ?? [])
+    .filter((o: any) => o.primary !== false)
+    .map((o: any) => o.label as string)
+    .filter((l: string) => l && !seen.has(l.toLowerCase()) && seen.add(l.toLowerCase()))
+})
+
+const detectedSecondary = computed(() => {
+  const seen = new Set<string>()
+  const primarySet = new Set(detectedPrimary.value.map((l: string) => l.toLowerCase()))
+  return selectedFindings.value
+    .flatMap((f: any) => f.detectedObjects ?? [])
+    .filter((o: any) => o.primary === false)
+    .map((o: any) => o.label as string)
+    .filter((l: string) => l && !primarySet.has(l.toLowerCase()) && !seen.has(l.toLowerCase()) && seen.add(l.toLowerCase()))
 })
 
 // ── Load initial results ───────────────────────────────────────
@@ -532,6 +564,20 @@ header {
 .detail-section { display: flex; flex-direction: column; gap: .5rem; }
 
 .result-meta-label { font-size: 9px; letter-spacing: .15em; text-transform: uppercase; color: var(--text-muted); }
+
+.objects-group { display: flex; flex-direction: column; gap: .35rem; }
+.objects-group-label { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
+.object-tags { display: flex; flex-wrap: wrap; gap: .35rem; }
+.object-tag {
+  font-size: 10px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase;
+  padding: .25rem .6rem; border-radius: 2px;
+}
+.object-tag.primary {
+  background: var(--amber-dim); border: 1px solid rgba(245,166,35,.5); color: var(--amber);
+}
+.object-tag.secondary {
+  background: var(--bg-raised); border: 1px solid var(--border-mid); color: var(--text-dim);
+}
 .result-scene-value { font-family: var(--serif); font-size: 1.3rem; line-height: 1.2; }
 .result-description { font-size: 12px; line-height: 1.7; color: var(--text-dim); border-left: 2px solid var(--border-mid); padding-left: .75rem; }
 .insights-list { list-style: none; display: flex; flex-direction: column; gap: .35rem; margin-top: .25rem; }
