@@ -8,41 +8,39 @@ A live dashboard shows all submitted images with Jarvis-style bounding box overl
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                            Browser                                  │
-│            Dashboard (auth)          Capture (public)               │
-└───┬──────────────┬───────────────────────┬───────────────┬──────────┘
-    │ HTTPS        │ POST /upload           │ PUT image     │ WebSocket
-    ▼              ▼                        ▼               │
-CloudFront    API Gateway             S3 (uploads)         │
-(frontend)        │                                        │
-                  ▼                                        │
-            API Lambda                                     │
-            ├── POST /analyze ──► async invoke ──────────► │
-            ├── GET  /results ──► DynamoDB                 │
-            └── DELETE /results (JWT) ──► DynamoDB + S3   │
-                                                           │
-    ┌──────────────────────────────────────────────────┐   │
-    │           Lambda Durable Function                │   │
-    │                                                  │   │
-    │  1. preprocess   moderate image + build N×N grid │───┼─► AppSync
-    │       │                                          │   │   Events
-    │  2. context.map  N concurrent Bedrock Nova calls │───┼─► (step +
-    │       │          (one per region, checkpointed)  │   │    region
-    │  3. synthesize   aggregate findings + insights   │───┼─► events)
-    │       │                                          │   │
-    │  4. store        DynamoDB + CloudFront URL       │───┼─► AppSync
-    │                                                  │   │   (dashboard)
-    └──────────────────────────────────────────────────┘   │
-                   │ reads image from S3                   │
-                   ▼                                        │
-            S3 (uploads)                                   │
-                                                           │
-    AppSync Events API ◄───────────────────────────────────┘
-           │ WebSocket push
-           ▼
-        Browser (live UI updates)
+```mermaid
+flowchart TD
+    Browser(["Browser"])
+    CF["CloudFront + S3 Frontend"]
+    APIGW["API Gateway"]
+    API["API Lambda"]
+    S3["S3 Image Uploads"]
+    Bedrock["Bedrock Nova Lite"]
+    DDB["DynamoDB"]
+    AppSync["AppSync Events API"]
+
+    subgraph Pipeline["Lambda Durable Function"]
+        P1["1. preprocess - moderate + build grid"]
+        P2["2. context.map - N x Bedrock calls"]
+        P3["3. synthesize - aggregate findings"]
+        P4["4. store - DynamoDB + thumbnail"]
+        P1 --> P2 --> P3 --> P4
+    end
+
+    Browser -->|serves app| CF
+    Browser -->|POST /upload| APIGW
+    Browser -->|PUT image direct| S3
+    Browser -->|POST /analyze| APIGW
+    Browser -->|GET /results| APIGW
+    APIGW --> API
+    API -->|presigned URL| S3
+    API -->|async invoke| Pipeline
+    API -->|read| DDB
+    Pipeline -->|read image| S3
+    P2 -->|InvokeModel| Bedrock
+    P4 -->|write| DDB
+    Pipeline -->|publish events| AppSync
+    AppSync -->|WebSocket| Browser
 ```
 
 ### Request flow
