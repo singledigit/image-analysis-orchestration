@@ -4,7 +4,6 @@
     <!-- ── Header ──────────────────────────────────────────────── -->
     <header>
       <div class="header-left">
-        <a href="/" class="back-btn" title="Dashboard">←</a>
         <span class="logo-mark">◈</span>
         <span class="site-title">Capture &amp; Analyse</span>
       </div>
@@ -119,7 +118,7 @@
               <span>{{ result.successfulRegions }} / {{ result.regionCount }} regions</span>
             </div>
 
-            <a href="/" class="view-board-btn">View on dashboard →</a>
+            <p class="result-board-note">Your image has been added to the demo display.</p>
           </div>
         </Transition>
 
@@ -415,13 +414,10 @@ main { display: flex; flex-direction: column; flex: 1; }
 .region-card-text { font-size: 10px; line-height: 1.6; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .result-footer { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); padding-top: 1rem; border-top: 1px solid var(--border); margin-top: .5rem; }
 
-.view-board-btn {
-  display: block; text-align: center; padding: .75rem;
-  background: var(--bg-raised); border: 1px solid var(--border-mid); border-radius: 3px;
-  color: var(--amber); text-decoration: none; font-size: 12px; letter-spacing: .05em;
-  transition: border-color .2s, background .2s;
+.result-board-note {
+  text-align: center; font-size: 11px; color: var(--text-muted);
+  padding: .75rem; border: 1px solid var(--border); border-radius: 3px;
 }
-.view-board-btn:hover { border-color: var(--amber); background: var(--amber-dim); }
 
 .error-banner { display: flex; align-items: flex-start; gap: .75rem; padding: 1rem; border: 1px solid rgba(224,85,85,.3); background: rgba(224,85,85,.06); border-radius: 3px; font-size: 11px; color: var(--red); line-height: 1.6; }
 .error-icon { font-size: 1rem; flex-shrink: 0; }
