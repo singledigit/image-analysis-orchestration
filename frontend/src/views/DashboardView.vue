@@ -10,6 +10,7 @@
       <div class="header-right">
         <span class="live-dot" :class="{ active: connected }" />
         <span class="live-label">{{ connected ? 'LIVE' : 'CONNECTING' }}</span>
+        <a class="blog-btn" href="https://edjgeek.com/blog/9-tiles-to-900-cv-pipelines/" target="_blank" rel="noopener">Read the blog</a>
         <a class="scan-btn" href="/capture">+ Capture</a>
         <button class="logout-btn" @click="handleLogout">Sign out</button>
       </div>
@@ -393,6 +394,14 @@ header {
   color: var(--text-muted); cursor: pointer; transition: color .15s, border-color .15s;
 }
 .logout-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+.blog-btn {
+  font-size: 10px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase;
+  padding: .3rem .7rem; border: 1px solid var(--border-mid); border-radius: 3px;
+  color: var(--text-dim); text-decoration: none; white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.blog-btn:hover { color: var(--amber); border-color: var(--amber); }
 
 /* Body split */
 .body {

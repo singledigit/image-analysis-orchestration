@@ -8,8 +8,7 @@
         <span class="site-title">Capture &amp; Analyse</span>
       </div>
       <div class="header-right">
-        <span class="tag">Durable Functions</span>
-        <span class="tag">Bedrock Nova</span>
+        <a class="blog-btn" href="https://edjgeek.com/blog/9-tiles-to-900-cv-pipelines/" target="_blank" rel="noopener">Read the blog</a>
       </div>
     </header>
 
@@ -434,5 +433,13 @@ main { display: flex; flex-direction: column; flex: 1; }
   .panel-output { flex: 1; }
   .drop-zone { aspect-ratio: unset; flex: 1; min-height: 240px; height: 0; }
 }
+.blog-btn {
+  font-size: 10px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase;
+  padding: .3rem .7rem; border: 1px solid var(--border-mid); border-radius: 3px;
+  color: var(--text-dim); text-decoration: none; white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.blog-btn:hover { color: var(--amber); border-color: var(--amber); }
+
 @media (max-width: 480px) { .header-right { display: none; } }
 </style>
