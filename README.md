@@ -11,37 +11,39 @@ A live dashboard shows all submitted images with Jarvis-style bounding box overl
 ```mermaid
 graph TD
     Browser["Browser"]
-    CF["CloudFront"]
-    S3F["S3 — frontend"]
+    CF["CloudFront / S3"]
     APIGW["API Gateway"]
     ApiLambda["API Lambda"]
     S3I["S3 — image uploads"]
-    Bedrock["Bedrock Nova Lite"]
+    Step1["preprocess"]
+    Step2["context.map — N x Bedrock Nova"]
+    Step3["synthesize"]
+    Step4["store"]
     DDB["DynamoDB"]
     AppSync["AppSync Events API"]
 
-    subgraph Durable ["Durable Pipeline — 4 checkpointed steps"]
-        Step1["1 preprocess"]
-        Step2["2 context.map"]
-        Step3["3 synthesize"]
-        Step4["4 store"]
-        Step1 --> Step2 --> Step3 --> Step4
-    end
-
-    Browser -->|HTTPS| CF
-    CF --> S3F
+    Browser -->|serves app| CF
     Browser -->|POST /upload| APIGW
     Browser -->|PUT image| S3I
     Browser -->|POST /analyze| APIGW
     Browser -->|GET /results| APIGW
     APIGW --> ApiLambda
     ApiLambda -->|presigned URL| S3I
-    ApiLambda -->|async invoke| Durable
-    ApiLambda -->|scan / get| DDB
-    Durable -->|GetObject| S3I
-    Durable -->|InvokeModel| Bedrock
-    Durable -->|PutItem| DDB
-    Durable -->|publish events| AppSync
+    ApiLambda -->|async invoke| Step1
+    ApiLambda -->|read| DDB
+
+    Step1 -->|build grid| Step2
+    Step2 -->|aggregate| Step3
+    Step3 -->|persist| Step4
+    Step4 -->|write| DDB
+
+    Step1 -->|read image| S3I
+    Step2 -->|read image| S3I
+    Step4 -->|publish complete| AppSync
+    Step1 -->|publish progress| AppSync
+    Step2 -->|publish progress| AppSync
+    Step3 -->|publish progress| AppSync
+
     AppSync -->|WebSocket| Browser
 ```
 
