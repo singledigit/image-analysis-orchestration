@@ -16,39 +16,32 @@ graph TD
     APIGW["API Gateway"]
     ApiLambda["API Lambda"]
     S3I["S3 — image uploads"]
-    Pipeline["Durable Pipeline Lambda"]
     Bedrock["Bedrock Nova Lite"]
     DDB["DynamoDB"]
     AppSync["AppSync Events API"]
 
+    subgraph Durable ["Durable Pipeline — 4 checkpointed steps"]
+        Step1["1 preprocess"]
+        Step2["2 context.map"]
+        Step3["3 synthesize"]
+        Step4["4 store"]
+        Step1 --> Step2 --> Step3 --> Step4
+    end
+
     Browser -->|HTTPS| CF
     CF --> S3F
-
     Browser -->|POST /upload| APIGW
-    Browser -->|PUT image direct| S3I
+    Browser -->|PUT image| S3I
     Browser -->|POST /analyze| APIGW
     Browser -->|GET /results| APIGW
     APIGW --> ApiLambda
     ApiLambda -->|presigned URL| S3I
-    ApiLambda -->|async invoke| Pipeline
+    ApiLambda -->|async invoke| Durable
     ApiLambda -->|scan / get| DDB
-
-    Pipeline -->|GetObject| S3I
-
-    subgraph Durable ["Durable Execution — 4 steps"]
-        Step1["preprocess — moderate + build region grid"]
-        Step2["context.map — N concurrent Bedrock calls"]
-        Step3["synthesize — aggregate findings"]
-        Step4["store — write DDB + emit dashboard event"]
-        Step1 --> Step2 --> Step3 --> Step4
-    end
-
-    Pipeline --> Step1
-    Step2 -->|InvokeModel| Bedrock
-    Step4 --> DDB
-    Step4 -->|publish dashboard event| AppSync
-    Pipeline -->|publish step + region events| AppSync
-
+    Durable -->|GetObject| S3I
+    Durable -->|InvokeModel| Bedrock
+    Durable -->|PutItem| DDB
+    Durable -->|publish events| AppSync
     AppSync -->|WebSocket| Browser
 ```
 
